@@ -1,0 +1,16 @@
+import { z } from "zod";
+import { signedMoneyInputSchema } from "./customer.js";
+import { moneyInputSchema, PAYMENT_METHODS } from "./purchase.js";
+const optionalText = (max: number) => z.string().trim().max(max).optional();
+const supplierFields = z.object({ name: z.string().trim().min(2).max(120), businessName: optionalText(150), phone: optionalText(30), whatsapp: optionalText(30), address: optionalText(500), taxIdentifier: optionalText(50), isActive: z.boolean() });
+export const createSupplierInputSchema = supplierFields.extend({ openingBalance: signedMoneyInputSchema });
+export const updateSupplierInputSchema = supplierFields;
+export const supplierListQuerySchema = z.object({ search: z.string().trim().max(100).default(""), active: z.enum(["ALL", "ACTIVE", "INACTIVE"]).default("ACTIVE"), page: z.coerce.number().int().positive().default(1), pageSize: z.coerce.number().int().min(1).max(200).default(50) });
+export const supplierPaymentInputSchema = z.object({ amount: moneyInputSchema, method: z.enum(PAYMENT_METHODS), paidAt: z.string().date(), reference: optionalText(100), notes: optionalText(500) });
+export const reverseSupplierLedgerInputSchema = z.object({ reason: z.string().trim().min(3).max(500) });
+export const supplierStatementQuerySchema = z.object({ from: z.string().date().optional(), to: z.string().date().optional() });
+export const supplierIdSchema = z.string().min(1);
+export type CreateSupplierInput = z.infer<typeof createSupplierInputSchema>;
+export type UpdateSupplierInput = z.infer<typeof updateSupplierInputSchema>;
+export type SupplierListQuery = z.infer<typeof supplierListQuerySchema>;
+export type SupplierPaymentInput = z.infer<typeof supplierPaymentInputSchema>;
