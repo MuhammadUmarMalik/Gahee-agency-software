@@ -1,0 +1,19 @@
+import { useEffect, useState } from "react";
+import { AlertTriangle, Boxes, Search } from "lucide-react";
+import type { InventoryStockDto } from "@oil-agency/shared";
+import { apiRequest } from "@/api/client";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { useAuthStore } from "@/stores/auth-store";
+
+export function InventoryPage() {
+  const token = useAuthStore((s) => s.token)!; const [stock, setStock] = useState<InventoryStockDto[]>([]); const [search, setSearch] = useState(""); const [low, setLow] = useState(false); const [error, setError] = useState("");
+  useEffect(() => { const q = new URLSearchParams({ search, lowStock: String(low) }); void apiRequest<{ stock: InventoryStockDto[] }>(`/inventory/stock?${q}`, {}, token).then((r) => { setStock(r.stock); setError(""); }).catch((e: Error) => setError(e.message)); }, [low, search, token]);
+  return <section className="p-8"><div className="mb-7"><p className="mb-2 text-sm font-semibold text-primary">INVENTORY</p><h1 className="m-0 text-3xl font-bold">Current stock</h1><p className="mt-2 text-sm text-muted-foreground">All quantities are stored and displayed in the product's smallest unit.</p></div>
+    {error && <div className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</div>}
+    <Card className="mb-5 flex items-center gap-4 p-4"><label className="relative flex-1"><Search className="absolute left-3 top-3 text-muted-foreground" size={18}/><Input className="pl-10" placeholder="Search product, SKU, or barcode" value={search} onChange={(e) => setSearch(e.target.value)}/></label><label className="flex items-center gap-2 text-sm font-medium"><input type="checkbox" checked={low} onChange={(e) => setLow(e.target.checked)}/> Low stock only</label></Card>
+    <div className="mb-5 grid grid-cols-4 gap-4"><Metric label="Products" value={stock.length}/><Metric label="Available" value={stock.reduce((s,p)=>s+p.availableBaseQty,0)}/><Metric label="Damaged written off" value={stock.reduce((s,p)=>s+p.damagedBaseQty,0)}/><Metric label="Low stock" value={stock.filter(p=>p.isLowStock).length} warning/></div>
+    <Card>{stock.length ? <Table><TableHeader><TableRow><TableHead>Product</TableHead><TableHead>Current</TableHead><TableHead>Available</TableHead><TableHead>Expired held</TableHead><TableHead>Returned</TableHead><TableHead>Reorder at</TableHead><TableHead>Batches</TableHead></TableRow></TableHeader><TableBody>{stock.map((p)=><TableRow key={p.productId}><TableCell><strong className="block">{p.name}</strong><span className="text-xs text-muted-foreground">{p.sku} · {p.baseUnit}</span></TableCell><TableCell>{p.currentBaseQty}</TableCell><TableCell className="font-semibold">{p.availableBaseQty}</TableCell><TableCell>{p.expiredBaseQty}</TableCell><TableCell>{p.returnedBaseQty}</TableCell><TableCell>{p.reorderLevelBaseQty}{p.isLowStock && <AlertTriangle className="ml-2 inline text-amber-600" size={16}/>}</TableCell><TableCell><details><summary className="cursor-pointer text-primary">{p.batches.length} batch(es)</summary><div className="mt-2 space-y-1 text-xs">{p.batches.map(b=><div key={b.id}>{b.batchNumber}: {b.stockBaseQty}{b.isExpired ? " (expired)" : ""}</div>)}</div></details></TableCell></TableRow>)}</TableBody></Table> : <div className="grid h-56 place-items-center text-muted-foreground"><Boxes/></div>}</Card></section>;
+}
+function Metric({label,value,warning=false}:{label:string;value:number;warning?:boolean}) { return <Card className="p-4"><p className="m-0 text-xs font-semibold uppercase text-muted-foreground">{label}</p><p className={`mb-0 mt-2 text-2xl font-bold ${warning&&value ? "text-amber-600":""}`}>{value}</p></Card>; }
