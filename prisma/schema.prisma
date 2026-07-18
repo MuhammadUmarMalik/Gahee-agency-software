@@ -1,0 +1,1150 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum ProductType {
+  OIL
+  GHEE
+  OTHER
+}
+
+enum SizeUnit {
+  MILLILITER
+  LITER
+  GRAM
+  KILOGRAM
+}
+
+enum DocumentStatus {
+  DRAFT
+  POSTED
+  VOIDED
+}
+
+enum PaymentStatus {
+  UNPAID
+  PARTIAL
+  PAID
+}
+
+enum SaleType {
+  RETAIL
+  WHOLESALE
+}
+
+enum CustomerType {
+  RETAILER
+  WHOLESALER
+  DISTRIBUTOR
+  OTHER
+}
+
+enum StockMovementType {
+  OPENING_STOCK
+  PURCHASE
+  SALE
+  SALES_RETURN
+  PURCHASE_RETURN
+  DAMAGE
+  EXPIRY
+  ADJUSTMENT_IN
+  ADJUSTMENT_OUT
+  CARTON_OPEN
+  REPLACEMENT_OUT
+}
+
+enum ReturnCondition {
+  RESALABLE
+  DAMAGED
+  EXPIRED
+  OPENED
+}
+
+enum SourceType {
+  OPENING_BALANCE
+  PRODUCT
+  PURCHASE
+  PURCHASE_RETURN
+  SALE
+  PAYMENT
+  SALES_RETURN
+  DAMAGE_ENTRY
+  EXPENSE
+  STOCK_ADJUSTMENT
+  MANUAL_ADJUSTMENT
+  PHYSICAL_COUNT
+  CUSTOMER
+  CUSTOMER_ADJUSTMENT
+  LEDGER_REVERSAL
+  SUPPLIER
+  SUPPLIER_ADJUSTMENT
+  SUPPLIER_LEDGER_REVERSAL
+  CASHBOOK
+  DAILY_CLOSING
+  FINANCIAL_TRANSACTION
+}
+
+enum LedgerEntryType {
+  OPENING_BALANCE
+  SALE
+  PURCHASE
+  PAYMENT
+  SALES_RETURN
+  PURCHASE_RETURN
+  ADJUSTMENT
+  MANUAL_DEBIT
+  MANUAL_CREDIT
+  REVERSAL
+}
+
+enum PaymentDirection {
+  IN
+  OUT
+}
+
+enum PartyType {
+  CUSTOMER
+  SUPPLIER
+  OTHER
+}
+
+enum PaymentMethod {
+  CASH
+  BANK_TRANSFER
+  CARD
+  CHEQUE
+  OTHER
+}
+
+enum RefundMethod {
+  CASH
+  CUSTOMER_LEDGER
+}
+
+enum PurchaseReturnMethod {
+  CASH
+  SUPPLIER_LEDGER
+}
+
+enum DamageType {
+  DAMAGED
+  EXPIRED
+  LEAKED
+  MISSING
+}
+
+enum AccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  CONTRA_REVENUE
+  EXPENSE
+}
+
+enum AccountNormalBalance {
+  DEBIT
+  CREDIT
+}
+
+enum JournalStatus {
+  POSTED
+  REVERSED
+}
+
+enum FinancialPeriodStatus {
+  OPEN
+  CLOSED
+  LOCKED
+}
+
+enum FinancialTransactionType {
+  OWNER_INVESTMENT
+  OWNER_WITHDRAWAL
+  CASH_TO_BANK
+  BANK_TO_CASH
+  BANK_TO_BANK
+  OTHER_INCOME
+  OTHER_EXPENSE
+}
+
+enum CashDirection {
+  IN
+  OUT
+}
+
+enum CashbookEntryType {
+  OPENING_CASH
+  CASH_SALE
+  CUSTOMER_RECOVERY
+  CASH_DEPOSIT
+  CASH_WITHDRAWAL
+  OWNER_INVESTMENT
+  OWNER_WITHDRAWAL
+  OTHER_INCOME
+  OTHER_EXPENSE
+  CLOSING_ADJUSTMENT
+  // Legacy internal types retained for existing local records.
+  SALE_RECEIPT
+  CUSTOMER_RECEIPT
+  PURCHASE_PAYMENT
+  SUPPLIER_PAYMENT
+  SALES_RETURN_REFUND
+  PURCHASE_RETURN_REFUND
+  EXPENSE
+  ADJUSTMENT
+}
+
+enum AuditAction {
+  CREATE
+  UPDATE
+  SOFT_DELETE
+  ACTIVATE
+  DEACTIVATE
+  RESET_PASSWORD
+  POST
+  VOID
+  BACKUP
+  RESTORE
+  REVERSE
+  CLOSE
+  REOPEN
+}
+
+model Role {
+  id          String           @id @default(cuid())
+  code        String           @unique
+  name        String
+  isSystem    Boolean          @default(false)
+  users       User[]
+  permissions RolePermission[]
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+}
+
+model Permission {
+  id          String           @id @default(cuid())
+  code        String           @unique
+  description String
+  roles       RolePermission[]
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+
+model User {
+  id                      String             @id @default(cuid())
+  username                String             @unique
+  displayName             String
+  passwordHash            String
+  ownerPinHash            String?
+  roleId                  String
+  role                    Role               @relation(fields: [roleId], references: [id])
+  isActive                Boolean            @default(true)
+  cashierDiscountLimitBps Int                @default(0)
+  failedLoginAttempts     Int                @default(0)
+  lockedUntil             DateTime?
+  lastLoginAt             DateTime?
+  deletedAt               DateTime?
+  sessions                Session[]
+  loginHistory            LoginHistory[]
+  auditLogs               AuditLog[]
+  stockMovements          StockMovement[]
+  sales                   Sale[]
+  purchases               Purchase[]
+  payments                Payment[]
+  salesReturns            SalesReturn[]
+  damageEntries           DamageEntry[]
+  cashbookEntries         CashbookEntry[]
+  dailyClosings           DailyClosing[]
+  expenses                Expense[]          @relation("ExpenseCreatedBy")
+  voidedExpenses          Expense[]          @relation("ExpenseVoidedBy")
+  stockCounts             StockCount[]
+  heldSales               HeldSale[]
+  customerLedgerEntries   CustomerLedger[]
+  supplierLedgerEntries   SupplierLedger[]
+  approvalsRequested      DiscountApproval[] @relation("ApprovalRequester")
+  approvalsGranted        DiscountApproval[] @relation("ApprovalOwner")
+  journalEntries          JournalEntry[]      @relation("JournalCreatedBy")
+  financialTransactions  FinancialTransaction[]
+  purchaseReturns         PurchaseReturn[]
+  createdAt               DateTime           @default(now())
+  updatedAt               DateTime           @updatedAt
+
+  @@index([roleId, isActive])
+}
+
+model DiscountApproval {
+  id            String    @id @default(cuid())
+  tokenHash     String    @unique
+  requestedById String
+  requestedBy   User      @relation("ApprovalRequester", fields: [requestedById], references: [id])
+  approvedById  String
+  approvedBy    User      @relation("ApprovalOwner", fields: [approvedById], references: [id])
+  discountBps   Int
+  expiresAt     DateTime
+  usedAt        DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([requestedById, expiresAt])
+}
+
+model Session {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, expiresAt])
+}
+
+model LoginHistory {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  username  String
+  success   Boolean
+  reason    String?
+  ipAddress String?
+  createdAt DateTime @default(now())
+
+  @@index([username, createdAt])
+}
+
+model Category {
+  id        String    @id @default(cuid())
+  name      String    @unique
+  isActive  Boolean   @default(true)
+  deletedAt DateTime?
+  products  Product[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Brand {
+  id        String    @id @default(cuid())
+  name      String    @unique
+  isActive  Boolean   @default(true)
+  deletedAt DateTime?
+  products  Product[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Unit {
+  id        String           @id @default(cuid())
+  name      String           @unique
+  symbol    String           @unique
+  isActive  Boolean          @default(true)
+  deletedAt DateTime?
+  products  Product[]
+  packings  ProductPacking[]
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+}
+
+model Product {
+  id                      String                       @id @default(cuid())
+  name                    String
+  sku                     String                       @unique
+  barcode                 String?                      @unique
+  categoryId              String?
+  category                Category?                    @relation(fields: [categoryId], references: [id])
+  brandId                 String?
+  brand                   Brand?                       @relation(fields: [brandId], references: [id])
+  baseUnitId              String
+  baseUnit                Unit                         @relation(fields: [baseUnitId], references: [id])
+  productType             ProductType                  @default(OIL)
+  sizeValue               Float?
+  sizeUnit                SizeUnit?
+  purchasePriceMinor      Int                          @default(0)
+  averageCostMinor        Int                          @default(0)
+  inventoryValueMinor     Int                          @default(0)
+  retailPriceMinor        Int                          @default(0)
+  wholesalePriceMinor     Int                          @default(0)
+  minimumPriceMinor       Int                          @default(0)
+  taxRateBps              Int                          @default(0)
+  reorderLevelBaseQty     Int                          @default(0)
+  stockOnHandBaseQty      Int                          @default(0)
+  rackLocation            String?
+  notes                   String?
+  trackBatch              Boolean                      @default(true)
+  trackExpiry             Boolean                      @default(true)
+  isActive                Boolean                      @default(true)
+  deletedAt               DateTime?
+  packings                ProductPacking[]
+  batches                 ProductBatch[]
+  stockMovements          StockMovement[]
+  saleItems               SaleItem[]
+  purchaseItems           PurchaseItem[]
+  salesReturnItems        SalesReturnItem[]
+  salesReturnReplacements SalesReturnReplacementItem[]
+  damageEntries           DamageEntry[]
+  stockCountItems         StockCountItem[]
+  journalLines            JournalLine[]
+  purchaseReturnItems     PurchaseReturnItem[]
+  createdAt               DateTime                     @default(now())
+  updatedAt               DateTime                     @updatedAt
+
+  @@index([name])
+  @@index([categoryId, brandId, isActive])
+}
+
+model ProductPacking {
+  id             String  @id @default(cuid())
+  productId      String
+  product        Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  unitId         String
+  unit           Unit    @relation(fields: [unitId], references: [id])
+  name           String
+  unitsPerPack   Int
+  barcode        String? @unique
+  isPurchaseUnit Boolean @default(false)
+  isSaleUnit     Boolean @default(false)
+  isActive       Boolean @default(true)
+
+  @@unique([productId, name])
+  @@index([productId, isActive])
+}
+
+model ProductBatch {
+  id                      String                       @id @default(cuid())
+  productId               String
+  product                 Product                      @relation(fields: [productId], references: [id])
+  batchNumber             String
+  manufactureDate         DateTime?
+  expiryDate              DateTime?
+  purchasePriceMinor      Int
+  stockOnHandBaseQty      Int                          @default(0)
+  stockMovements          StockMovement[]
+  saleItems               SaleItem[]
+  purchaseItems           PurchaseItem[]
+  salesReturnItems        SalesReturnItem[]
+  salesReturnReplacements SalesReturnReplacementItem[]
+  damageEntries           DamageEntry[]
+  stockCountItems         StockCountItem[]
+  purchaseReturnItems     PurchaseReturnItem[]
+  createdAt               DateTime                     @default(now())
+  updatedAt               DateTime                     @updatedAt
+
+  @@unique([productId, batchNumber])
+  @@index([expiryDate, stockOnHandBaseQty])
+}
+
+model StockMovement {
+  id                    String            @id @default(cuid())
+  productId             String
+  product               Product           @relation(fields: [productId], references: [id])
+  batchId               String?
+  batch                 ProductBatch?     @relation(fields: [batchId], references: [id])
+  movementType          StockMovementType
+  quantityBase          Int
+  balanceAfterBase      Int
+  batchBalanceAfterBase Int?
+  unitCostMinor         Int               @default(0)
+  valueMinor            Int               @default(0)
+  sourceType            SourceType
+  sourceId              String
+  sourceLineId          String
+  notes                 String?
+  createdById           String
+  createdBy             User              @relation(fields: [createdById], references: [id])
+  createdAt             DateTime          @default(now())
+
+  @@unique([sourceType, sourceId, sourceLineId])
+  @@index([productId, createdAt])
+  @@index([batchId, createdAt])
+  @@index([sourceType, sourceId])
+}
+
+model Customer {
+  id                  String           @id @default(cuid())
+  code                String           @unique
+  name                String
+  businessName        String?
+  phone               String?
+  whatsapp            String?
+  address             String?
+  taxIdentifier       String?
+  customerType        CustomerType     @default(RETAILER)
+  creditLimitMinor    Int              @default(0)
+  openingBalanceMinor Int              @default(0)
+  paymentTermsDays    Int              @default(0)
+  isActive            Boolean          @default(true)
+  deletedAt           DateTime?
+  sales               Sale[]
+  payments            Payment[]
+  ledgerEntries       CustomerLedger[]
+  salesReturns        SalesReturn[]
+  journalLines        JournalLine[]
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  @@index([name])
+  @@index([phone])
+  @@index([businessName])
+  @@index([customerType, isActive])
+}
+
+model Supplier {
+  id                  String           @id @default(cuid())
+  code                String           @unique
+  name                String
+  businessName        String?
+  phone               String?
+  whatsapp            String?
+  address             String?
+  taxIdentifier       String?
+  openingBalanceMinor Int              @default(0)
+  isActive            Boolean          @default(true)
+  deletedAt           DateTime?
+  purchases           Purchase[]
+  payments            Payment[]
+  ledgerEntries       SupplierLedger[]
+  journalLines        JournalLine[]
+  purchaseReturns     PurchaseReturn[]
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+
+  @@index([name])
+  @@index([phone])
+  @@index([businessName])
+}
+
+model Purchase {
+  id                        String           @id @default(cuid())
+  invoiceNumber             String           @unique
+  supplierInvoice           String?
+  supplierInvoiceNormalized String?
+  supplierId                String
+  supplier                  Supplier         @relation(fields: [supplierId], references: [id])
+  status                    DocumentStatus   @default(POSTED)
+  paymentStatus             PaymentStatus
+  subtotalMinor             Int
+  discountMinor             Int              @default(0)
+  taxMinor                  Int              @default(0)
+  transportMinor            Int              @default(0)
+  loadingMinor              Int              @default(0)
+  otherExpenseMinor         Int              @default(0)
+  totalMinor                Int
+  paidMinor                 Int              @default(0)
+  dueDate                   DateTime?
+  notes                     String?
+  purchasedAt               DateTime         @default(now())
+  createdById               String
+  createdBy                 User             @relation(fields: [createdById], references: [id])
+  items                     PurchaseItem[]
+  payments                  Payment[]
+  supplierLedger            SupplierLedger[]
+  returns                   PurchaseReturn[]
+  createdAt                 DateTime         @default(now())
+  updatedAt                 DateTime         @updatedAt
+
+  @@unique([supplierId, supplierInvoice])
+  @@index([supplierId, supplierInvoiceNormalized])
+  @@index([supplierId, purchasedAt])
+  @@index([purchasedAt, status])
+}
+
+model PurchaseItem {
+  id                String        @id @default(cuid())
+  purchaseId        String
+  purchase          Purchase      @relation(fields: [purchaseId], references: [id], onDelete: Restrict)
+  productId         String
+  product           Product       @relation(fields: [productId], references: [id])
+  batchId           String?
+  batch             ProductBatch? @relation(fields: [batchId], references: [id])
+  packingName       String
+  unitsPerPack      Int
+  packQuantity      Int
+  baseQuantity      Int           @default(0)
+  quantityBase      Int
+  purchaseRateMinor Int           @default(0)
+  unitCostMinor     Int
+  discountMinor     Int           @default(0)
+  taxMinor          Int           @default(0)
+  lineTotalMinor    Int
+  returnItems       PurchaseReturnItem[]
+
+  @@index([purchaseId])
+  @@index([productId, batchId])
+}
+
+model Sale {
+  id                   String           @id @default(cuid())
+  invoiceNumber        String           @unique
+  customerId           String?
+  customer             Customer?        @relation(fields: [customerId], references: [id])
+  status               DocumentStatus   @default(POSTED)
+  paymentStatus        PaymentStatus
+  saleType             SaleType         @default(RETAIL)
+  subtotalMinor        Int
+  discountMinor        Int              @default(0)
+  taxMinor             Int              @default(0)
+  totalMinor           Int
+  paidMinor            Int              @default(0)
+  previousBalanceMinor Int              @default(0)
+  currentBalanceMinor  Int              @default(0)
+  dueDate              DateTime?
+  notes                String?
+  soldAt               DateTime         @default(now())
+  createdById          String
+  createdBy            User             @relation(fields: [createdById], references: [id])
+  items                SaleItem[]
+  payments             Payment[]
+  customerLedger       CustomerLedger[]
+  returns              SalesReturn[]
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+
+  @@index([customerId, soldAt])
+  @@index([soldAt, status])
+}
+
+model SaleItem {
+  id             String            @id @default(cuid())
+  saleId         String
+  sale           Sale              @relation(fields: [saleId], references: [id], onDelete: Restrict)
+  productId      String
+  product        Product           @relation(fields: [productId], references: [id])
+  batchId        String?
+  batch          ProductBatch?     @relation(fields: [batchId], references: [id])
+  packingName    String
+  unitsPerPack   Int
+  packQuantity   Int
+  baseQuantity   Int               @default(0)
+  quantityBase   Int
+  unitPriceMinor Int
+  costPriceMinor Int
+  discountMinor  Int               @default(0)
+  taxMinor       Int               @default(0)
+  lineTotalMinor Int
+  returnItems    SalesReturnItem[]
+
+  @@index([saleId])
+  @@index([productId, batchId])
+}
+
+model HeldSale {
+  id          String   @id @default(cuid())
+  label       String
+  cartJson    String
+  createdById String
+  createdBy   User     @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([createdById, updatedAt])
+}
+
+model CustomerLedger {
+  id                String          @id @default(cuid())
+  customerId        String
+  customer          Customer        @relation(fields: [customerId], references: [id])
+  entryType         LedgerEntryType
+  debitMinor        Int             @default(0)
+  creditMinor       Int             @default(0)
+  sourceType        SourceType
+  sourceId          String
+  saleId            String?
+  sale              Sale?           @relation(fields: [saleId], references: [id])
+  paymentId         String?
+  payment           Payment?        @relation(fields: [paymentId], references: [id])
+  salesReturnId     String?
+  salesReturn       SalesReturn?    @relation(fields: [salesReturnId], references: [id])
+  notes             String?
+  dueDate           DateTime?
+  reversalOfEntryId String?         @unique
+  reversalOfEntry   CustomerLedger? @relation("CustomerLedgerReversal", fields: [reversalOfEntryId], references: [id], onDelete: Restrict)
+  reversalEntry     CustomerLedger? @relation("CustomerLedgerReversal")
+  createdById       String?
+  createdBy         User?           @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  occurredAt        DateTime        @default(now())
+  createdAt         DateTime        @default(now())
+
+  @@unique([sourceType, sourceId, entryType])
+  @@index([customerId, occurredAt])
+}
+
+model SupplierLedger {
+  id                String          @id @default(cuid())
+  supplierId        String
+  supplier          Supplier        @relation(fields: [supplierId], references: [id])
+  entryType         LedgerEntryType
+  debitMinor        Int             @default(0)
+  creditMinor       Int             @default(0)
+  sourceType        SourceType
+  sourceId          String
+  purchaseId        String?
+  purchase          Purchase?       @relation(fields: [purchaseId], references: [id])
+  paymentId         String?
+  payment           Payment?        @relation(fields: [paymentId], references: [id])
+  notes             String?
+  dueDate           DateTime?
+  reversalOfEntryId String?         @unique
+  reversalOfEntry   SupplierLedger? @relation("SupplierLedgerReversal", fields: [reversalOfEntryId], references: [id], onDelete: Restrict)
+  reversalEntry     SupplierLedger? @relation("SupplierLedgerReversal")
+  createdById       String?
+  createdBy         User?           @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  occurredAt        DateTime        @default(now())
+  createdAt         DateTime        @default(now())
+
+  @@unique([sourceType, sourceId, entryType])
+  @@index([supplierId, occurredAt])
+}
+
+model Payment {
+  id              String           @id @default(cuid())
+  receiptNumber   String           @unique
+  direction       PaymentDirection
+  partyType       PartyType
+  customerId      String?
+  customer        Customer?        @relation(fields: [customerId], references: [id])
+  supplierId      String?
+  supplier        Supplier?        @relation(fields: [supplierId], references: [id])
+  saleId          String?
+  sale            Sale?            @relation(fields: [saleId], references: [id])
+  purchaseId      String?
+  purchase        Purchase?        @relation(fields: [purchaseId], references: [id])
+  method          PaymentMethod
+  bankAccountId   String?
+  bankAccount     BankAccount?     @relation(fields: [bankAccountId], references: [id])
+  amountMinor     Int
+  status          DocumentStatus   @default(POSTED)
+  reversalOfId    String?          @unique
+  reversalOf      Payment?         @relation("PaymentReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
+  reversalPayment Payment?         @relation("PaymentReversal")
+  reference       String?
+  notes           String?
+  paidAt          DateTime         @default(now())
+  createdById     String
+  createdBy       User             @relation(fields: [createdById], references: [id])
+  customerLedger  CustomerLedger[]
+  supplierLedger  SupplierLedger[]
+  cashbookEntries CashbookEntry[]
+  createdAt       DateTime         @default(now())
+
+  @@index([customerId, paidAt])
+  @@index([supplierId, paidAt])
+  @@index([saleId])
+  @@index([purchaseId])
+  @@index([bankAccountId, paidAt])
+}
+
+model SalesReturn {
+  id                    String                       @id @default(cuid())
+  returnNumber          String                       @unique
+  saleId                String
+  sale                  Sale                         @relation(fields: [saleId], references: [id])
+  customerId            String?
+  customer              Customer?                    @relation(fields: [customerId], references: [id])
+  status                DocumentStatus               @default(POSTED)
+  refundMethod          RefundMethod
+  totalMinor            Int
+  returnTotalMinor      Int
+  replacementTotalMinor Int                          @default(0)
+  refundMinor           Int
+  reason                String
+  returnedAt            DateTime                     @default(now())
+  createdById           String
+  createdBy             User                         @relation(fields: [createdById], references: [id])
+  items                 SalesReturnItem[]
+  replacementItems      SalesReturnReplacementItem[]
+  customerLedger        CustomerLedger[]
+  cashbookEntries       CashbookEntry[]
+  createdAt             DateTime                     @default(now())
+
+  @@index([saleId, returnedAt])
+}
+
+model SalesReturnItem {
+  id             String          @id @default(cuid())
+  salesReturnId  String
+  salesReturn    SalesReturn     @relation(fields: [salesReturnId], references: [id], onDelete: Restrict)
+  saleItemId     String
+  saleItem       SaleItem        @relation(fields: [saleItemId], references: [id])
+  productId      String
+  product        Product         @relation(fields: [productId], references: [id])
+  batchId        String?
+  batch          ProductBatch?   @relation(fields: [batchId], references: [id])
+  quantityBase   Int
+  unitPriceMinor Int
+  lineTotalMinor Int
+  condition      ReturnCondition
+
+  @@index([saleItemId])
+}
+
+model SalesReturnReplacementItem {
+  id             String        @id @default(cuid())
+  salesReturnId  String
+  salesReturn    SalesReturn   @relation(fields: [salesReturnId], references: [id], onDelete: Restrict)
+  productId      String
+  product        Product       @relation(fields: [productId], references: [id])
+  batchId        String?
+  batch          ProductBatch? @relation(fields: [batchId], references: [id])
+  packingName    String
+  unitsPerPack   Int
+  quantityBase   Int
+  unitPriceMinor Int
+  lineTotalMinor Int
+
+  @@index([salesReturnId])
+  @@index([productId, batchId])
+}
+
+model DamageEntry {
+  id           String        @id @default(cuid())
+  entryNumber  String        @unique
+  type         DamageType
+  productId    String
+  product      Product       @relation(fields: [productId], references: [id])
+  batchId      String?
+  batch        ProductBatch? @relation(fields: [batchId], references: [id])
+  quantityBase Int
+  costMinor    Int
+  reason       String
+  status       DocumentStatus @default(POSTED)
+  occurredAt   DateTime      @default(now())
+  createdById  String
+  createdBy    User          @relation(fields: [createdById], references: [id])
+  createdAt    DateTime      @default(now())
+
+  @@index([productId, occurredAt])
+  @@index([batchId, occurredAt])
+}
+
+model StockCount {
+  id          String           @id @default(cuid())
+  countNumber String           @unique
+  status      DocumentStatus   @default(POSTED)
+  notes       String?
+  countedAt   DateTime         @default(now())
+  createdById String
+  createdBy   User             @relation(fields: [createdById], references: [id])
+  items       StockCountItem[]
+  createdAt   DateTime         @default(now())
+
+  @@index([countedAt, status])
+  @@index([createdById, countedAt])
+}
+
+model StockCountItem {
+  id              String        @id @default(cuid())
+  stockCountId    String
+  stockCount      StockCount    @relation(fields: [stockCountId], references: [id], onDelete: Restrict)
+  productId       String
+  product         Product       @relation(fields: [productId], references: [id])
+  batchId         String?
+  batch           ProductBatch? @relation(fields: [batchId], references: [id])
+  expectedBaseQty Int
+  countedBaseQty  Int
+  varianceBaseQty Int
+  createdAt       DateTime      @default(now())
+
+  @@unique([stockCountId, productId, batchId])
+  @@index([productId, createdAt])
+  @@index([batchId, createdAt])
+}
+
+model ExpenseCategory {
+  id        String    @id @default(cuid())
+  name      String    @unique
+  isActive  Boolean   @default(true)
+  deletedAt DateTime?
+  expenses  Expense[]
+  accountId String?
+  account   Account?  @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([isActive, name])
+}
+
+model Expense {
+  id              String          @id @default(cuid())
+  voucherNumber   String          @unique
+  category        String
+  categoryId      String?
+  expenseCategory ExpenseCategory? @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  description     String
+  amountMinor     Int
+  method          PaymentMethod
+  bankAccountId   String?
+  bankAccount     BankAccount?     @relation(fields: [bankAccountId], references: [id])
+  reference       String?
+  status          DocumentStatus  @default(POSTED)
+  incurredAt      DateTime        @default(now())
+  createdById     String
+  createdBy       User            @relation("ExpenseCreatedBy", fields: [createdById], references: [id])
+  voidedAt        DateTime?
+  voidedById      String?
+  voidedBy        User?           @relation("ExpenseVoidedBy", fields: [voidedById], references: [id])
+  voidReason      String?
+  cashbookEntries CashbookEntry[]
+  createdAt       DateTime        @default(now())
+
+  @@index([incurredAt, status])
+  @@index([categoryId, incurredAt])
+  @@index([createdById, incurredAt])
+  @@index([bankAccountId, incurredAt])
+}
+
+model CashbookEntry {
+  id            String            @id @default(cuid())
+  entryNumber   String            @unique
+  direction     CashDirection
+  entryType     CashbookEntryType
+  amountMinor   Int
+  paymentId     String?
+  payment       Payment?          @relation(fields: [paymentId], references: [id])
+  salesReturnId String?
+  salesReturn   SalesReturn?      @relation(fields: [salesReturnId], references: [id])
+  expenseId     String?
+  expense       Expense?          @relation(fields: [expenseId], references: [id])
+  sourceType    SourceType
+  sourceId      String
+  notes         String?
+  reference     String?
+  reversalOfId  String?           @unique
+  reversalOf    CashbookEntry?    @relation("CashbookReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
+  reversalEntry CashbookEntry?    @relation("CashbookReversal")
+  occurredAt    DateTime          @default(now())
+  createdById   String
+  createdBy     User              @relation(fields: [createdById], references: [id])
+  createdAt     DateTime          @default(now())
+
+  @@unique([sourceType, sourceId, entryType])
+  @@index([occurredAt, direction])
+  @@index([createdById, occurredAt])
+  @@index([entryType, occurredAt])
+}
+
+model DailyClosing {
+  id                String   @id @default(cuid())
+  businessDate      DateTime @unique
+  openingCashMinor  Int
+  cashInMinor       Int
+  cashOutMinor      Int
+  expectedCashMinor Int
+  countedCashMinor  Int
+  differenceMinor   Int
+  notes             String?
+  closedById        String
+  closedBy          User     @relation(fields: [closedById], references: [id])
+  closedAt          DateTime @default(now())
+  createdAt         DateTime @default(now())
+
+  @@index([closedById, closedAt])
+}
+
+model Setting {
+  key       String   @id
+  valueJson String
+  isSecret  Boolean  @default(false)
+  updatedAt DateTime @updatedAt
+}
+
+model AuditLog {
+  id         String      @id @default(cuid())
+  userId     String?
+  user       User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action     AuditAction
+  entityType String
+  entityId   String?
+  beforeJson String?
+  afterJson  String?
+  ipAddress  String?
+  createdAt  DateTime    @default(now())
+
+  @@index([entityType, entityId, createdAt])
+  @@index([userId, createdAt])
+}
+
+model Account {
+  id                String               @id @default(cuid())
+  code              String               @unique
+  name              String
+  type              AccountType
+  normalBalance     AccountNormalBalance
+  systemCode        String?              @unique
+  parentId          String?
+  parent            Account?             @relation("AccountHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
+  children          Account[]            @relation("AccountHierarchy")
+  allowManual       Boolean              @default(false)
+  isActive          Boolean              @default(true)
+  isSystem          Boolean              @default(false)
+  deletedAt         DateTime?
+  journalLines      JournalLine[]
+  bankAccounts      BankAccount[]
+  expenseCategories ExpenseCategory[]
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  @@index([type, isActive])
+  @@index([parentId])
+}
+
+model FinancialPeriod {
+  id        String                @id @default(cuid())
+  name      String                @unique
+  startDate DateTime
+  endDate   DateTime
+  status    FinancialPeriodStatus @default(OPEN)
+  closedAt  DateTime?
+  closedById String?
+  journals  JournalEntry[]
+  createdAt DateTime              @default(now())
+  updatedAt DateTime              @updatedAt
+
+  @@unique([startDate, endDate])
+  @@index([status, startDate, endDate])
+}
+
+model JournalEntry {
+  id               String          @id @default(cuid())
+  entryNumber      String          @unique
+  sourceType       SourceType
+  sourceId         String
+  postingKey       String          @default("PRIMARY")
+  transactionDate  DateTime
+  description      String
+  status           JournalStatus   @default(POSTED)
+  totalDebitMinor  Int
+  totalCreditMinor Int
+  periodId         String
+  period           FinancialPeriod @relation(fields: [periodId], references: [id], onDelete: Restrict)
+  reversalOfId     String?         @unique
+  reversalOf       JournalEntry?   @relation("JournalReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
+  reversalEntry    JournalEntry?   @relation("JournalReversal")
+  reversalReason   String?
+  createdById      String
+  createdBy        User            @relation("JournalCreatedBy", fields: [createdById], references: [id])
+  lines            JournalLine[]
+  createdAt        DateTime        @default(now())
+
+  @@unique([sourceType, sourceId, postingKey])
+  @@index([transactionDate, status])
+  @@index([periodId, status])
+}
+
+model JournalLine {
+  id          String       @id @default(cuid())
+  journalId   String
+  journal     JournalEntry @relation(fields: [journalId], references: [id], onDelete: Restrict)
+  lineNumber  Int
+  accountId   String
+  account     Account      @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  debitMinor  Int          @default(0)
+  creditMinor Int          @default(0)
+  customerId  String?
+  customer    Customer?    @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  supplierId  String?
+  supplier    Supplier?    @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  productId   String?
+  product     Product?     @relation(fields: [productId], references: [id], onDelete: Restrict)
+  memo        String?
+  createdAt   DateTime     @default(now())
+
+  @@unique([journalId, lineNumber])
+  @@index([accountId, journalId])
+  @@index([customerId, journalId])
+  @@index([supplierId, journalId])
+  @@index([productId, journalId])
+}
+
+model BankAccount {
+  id               String                 @id @default(cuid())
+  name             String
+  accountNumber    String?
+  bankName         String?
+  glAccountId      String                 @unique
+  glAccount        Account                @relation(fields: [glAccountId], references: [id], onDelete: Restrict)
+  isActive         Boolean                @default(true)
+  deletedAt        DateTime?
+  payments         Payment[]
+  expenses         Expense[]
+  transactionsFrom FinancialTransaction[] @relation("TransactionFromBank")
+  transactionsTo   FinancialTransaction[] @relation("TransactionToBank")
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+
+  @@index([isActive, name])
+}
+
+model FinancialTransaction {
+  id                String                   @id @default(cuid())
+  transactionNumber String                   @unique
+  type              FinancialTransactionType
+  amountMinor       Int
+  fromBankAccountId String?
+  fromBankAccount   BankAccount?             @relation("TransactionFromBank", fields: [fromBankAccountId], references: [id], onDelete: Restrict)
+  toBankAccountId   String?
+  toBankAccount     BankAccount?             @relation("TransactionToBank", fields: [toBankAccountId], references: [id], onDelete: Restrict)
+  offsetAccountId   String?
+  description       String
+  reference         String?
+  occurredAt        DateTime
+  status            DocumentStatus           @default(POSTED)
+  createdById       String
+  createdBy         User                     @relation(fields: [createdById], references: [id])
+  createdAt         DateTime                 @default(now())
+
+  @@index([occurredAt, status])
+  @@index([type, occurredAt])
+}
+
+model PurchaseReturn {
+  id            String         @id @default(cuid())
+  returnNumber  String         @unique
+  purchaseId    String
+  purchase      Purchase       @relation(fields: [purchaseId], references: [id], onDelete: Restrict)
+  supplierId    String
+  supplier      Supplier       @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  status        DocumentStatus @default(POSTED)
+  method        PurchaseReturnMethod
+  subtotalMinor Int
+  taxMinor      Int            @default(0)
+  totalMinor    Int
+  reason        String
+  returnedAt    DateTime
+  createdById   String
+  createdBy     User           @relation(fields: [createdById], references: [id])
+  items         PurchaseReturnItem[]
+  createdAt     DateTime       @default(now())
+
+  @@index([purchaseId, returnedAt])
+  @@index([supplierId, returnedAt])
+}
+
+model PurchaseReturnItem {
+  id               String         @id @default(cuid())
+  purchaseReturnId String
+  purchaseReturn   PurchaseReturn @relation(fields: [purchaseReturnId], references: [id], onDelete: Restrict)
+  purchaseItemId   String
+  purchaseItem     PurchaseItem   @relation(fields: [purchaseItemId], references: [id], onDelete: Restrict)
+  productId        String
+  product          Product        @relation(fields: [productId], references: [id], onDelete: Restrict)
+  batchId          String?
+  batch            ProductBatch?  @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  quantityBase     Int
+  unitCostMinor    Int
+  lineTotalMinor   Int
+
+  @@index([purchaseItemId])
+  @@index([productId, batchId])
+}

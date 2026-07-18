@@ -1,0 +1,28 @@
+{
+  "name": "oil-agency-pos",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "postinstall": "prisma generate && npm run build -w @oil-agency/shared",
+    "dev": "npm run dev:desktop",
+    "dev:api": "npm run dev -w @oil-agency/api",
+    "dev:desktop": "npm run dev -w @oil-agency/desktop",
+    "build": "npm run build -ws --if-present",
+    "typecheck": "npm run typecheck -ws --if-present",
+    "test": "npm run test -ws --if-present",
+    "db:generate": "prisma generate",
+    "db:ensure": "cross-env DATABASE_URL=file:./data/agency.db prisma db push --skip-generate",
+    "db:migrate": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy",
+    "db:seed": "tsx prisma/seed.ts"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "cross-env": "^7.0.3",
+    "prisma": "^6.8.2",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  }
+}

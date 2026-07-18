@@ -1,0 +1,5 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo", "noEmit": true, "types": ["node"], "paths": { "@oil-agency/shared": ["../../packages/shared/src/index.ts"] } },
+  "include": ["electron", "vite.config.ts", "../api/src/types/express.d.ts"]
+}
