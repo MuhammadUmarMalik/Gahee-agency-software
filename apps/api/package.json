@@ -1,0 +1,37 @@
+{
+  "name": "@oil-agency/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { "./app": "./src/app.ts" },
+  "scripts": {
+    "predev": "npm run build -w @oil-agency/shared",
+    "dev": "tsx watch src/server.ts",
+    "prebuild": "npm run build -w @oil-agency/shared",
+    "build": "tsc -p tsconfig.json",
+    "pretypecheck": "npm run build -w @oil-agency/shared",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "pretest": "npm run build -w @oil-agency/shared",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@oil-agency/shared": "*",
+    "@prisma/client": "^6.8.2",
+    "argon2": "^0.41.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.5.0",
+    "express": "^5.1.0",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.1.0",
+    "zod": "^3.25.28"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.18",
+    "@types/express": "^5.0.2",
+    "@types/node": "^22.15.21",
+    "supertest": "^7.1.1",
+    "@types/supertest": "^6.0.3",
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.4"
+  }
+}

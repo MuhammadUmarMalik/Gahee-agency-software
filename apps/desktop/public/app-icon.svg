@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Oil Agency POS">
+  <defs>
+    <linearGradient id="background" x1="72" y1="48" x2="440" y2="464" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#059669"/>
+      <stop offset="1" stop-color="#065f46"/>
+    </linearGradient>
+    <linearGradient id="drop" x1="190" y1="122" x2="330" y2="388" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fef3c7"/>
+      <stop offset="1" stop-color="#fbbf24"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#background)"/>
+  <path d="M256 82c-18 39-112 142-112 224 0 68 50 124 112 124s112-56 112-124C368 224 274 121 256 82Z" fill="url(#drop)"/>
+  <path d="M217 344c17 22 48 31 75 17 17-9 29-25 34-45" fill="none" stroke="#fff" stroke-linecap="round" stroke-width="24" opacity=".9"/>
+  <circle cx="404" cy="108" r="42" fill="#fff" opacity=".16"/>
+</svg>
