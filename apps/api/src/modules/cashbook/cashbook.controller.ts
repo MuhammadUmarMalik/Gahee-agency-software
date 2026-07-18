@@ -1,0 +1,5 @@
+import type { Request, Response } from "express";
+import { cashbookDateSchema, cashbookReportQuerySchema, createCashbookEntryInputSchema, dailyClosingInputSchema } from "@oil-agency/shared";
+import type { CashbookService } from "./cashbook.service.js";
+
+export class CashbookController { constructor(private readonly service: CashbookService) {} users = async (_req: Request, res: Response) => res.json({ users: await this.service.users() }); report = async (req: Request, res: Response) => res.json(await this.service.report(cashbookReportQuerySchema.parse(req.query))); day = async (req: Request, res: Response) => { const date = cashbookDateSchema.parse(req.params.date); res.json(await this.service.daySummary(date)); }; create = async (req: Request, res: Response) => res.status(201).json({ entry: await this.service.createEntry(createCashbookEntryInputSchema.parse(req.body), req.auth!.id) }); close = async (req: Request, res: Response) => res.status(201).json({ closing: await this.service.close(dailyClosingInputSchema.parse(req.body), req.auth!.id) }); }
