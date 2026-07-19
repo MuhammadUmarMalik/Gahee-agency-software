@@ -17,12 +17,13 @@ import {
   Landmark,
 } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
-import { useEffect, useState } from "react";
-import { DEFAULT_BUSINESS_SETTING, PERMISSIONS, type BusinessSetting, type PermissionCode } from "@oil-agency/shared";
+import { useEffect } from "react";
+import { PERMISSIONS, type BusinessSetting, type PermissionCode } from "@oil-agency/shared";
 import { apiRequest } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/cn";
 import { useAuthStore } from "@/stores/auth-store";
+import { useBusinessStore } from "@/stores/business-store";
 
 type MenuLink = {
   to: string;
@@ -135,8 +136,9 @@ const sections: Array<{ label: string; links: MenuLink[] }> = [
 
 export function AppLayout() {
   const { user, logout, token } = useAuthStore();
-  const [business, setBusiness] = useState<BusinessSetting>(DEFAULT_BUSINESS_SETTING);
-  useEffect(() => { if (token) void apiRequest<{ business: BusinessSetting }>("/settings/client", {}, token).then((result) => setBusiness(result.business)).catch(() => undefined); }, [token]);
+  const business = useBusinessStore((state) => state.business);
+  const setBusiness = useBusinessStore((state) => state.setBusiness);
+  useEffect(() => { if (token) void apiRequest<{ business: BusinessSetting }>("/settings/client", {}, token).then((result) => setBusiness(result.business)).catch(() => undefined); }, [setBusiness, token]);
   return (
     <div className="grid min-h-screen grid-cols-[236px_minmax(0,1fr)]">
       <aside className="relative flex h-screen flex-col overflow-hidden border-r border-slate-200 bg-white text-foreground">

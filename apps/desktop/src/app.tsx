@@ -20,6 +20,7 @@ const PurchasesPage = lazy(() => import("@/pages/purchases-page").then((module) 
 const PurchaseFormPage = lazy(() => import("@/pages/purchase-form-page").then((module) => ({ default: module.PurchaseFormPage })));
 const PurchaseDetailPage = lazy(() => import("@/pages/purchase-detail-page").then((module) => ({ default: module.PurchaseDetailPage })));
 const PosPage = lazy(() => import("@/pages/pos-page").then((module) => ({ default: module.PosPage })));
+const SaleDetailPage = lazy(() => import("@/pages/sale-detail-page").then((module) => ({ default: module.SaleDetailPage })));
 const CustomersPage = lazy(() => import("@/pages/customers-page").then((module) => ({ default: module.CustomersPage })));
 const CustomerFormPage = lazy(() => import("@/pages/customer-form-page").then((module) => ({ default: module.CustomerFormPage })));
 const CustomerDetailPage = lazy(() => import("@/pages/customer-detail-page").then((module) => ({ default: module.CustomerDetailPage })));
@@ -39,6 +40,7 @@ const PurchaseReturnsPage = lazy(() => import("@/pages/purchase-returns-page").t
 const router = createBrowserRouter([{ path: "/", element: <ProtectedRoute><AppLayout/></ProtectedRoute>, children: [
   { index: true, element: <HomePage/> },
   { path: "pos", element: <ProtectedRoute permission={PERMISSIONS.POS_USE}><PosPage/></ProtectedRoute> },
+  { path: "sales/:id", element: <ProtectedRoute permission={PERMISSIONS.SALES_VIEW}><SaleDetailPage/></ProtectedRoute> },
   { path: "sales-returns", element: <ProtectedRoute permission={PERMISSIONS.SALES_RETURN}><SalesReturnPage/></ProtectedRoute> },
   { path: "cashbook", element: <ProtectedRoute permission={PERMISSIONS.CASHBOOK_VIEW}><CashbookPage/></ProtectedRoute> },
   { path: "expenses", element: <ProtectedRoute permission={PERMISSIONS.CASHBOOK_VIEW}><ExpensesPage/></ProtectedRoute> },
