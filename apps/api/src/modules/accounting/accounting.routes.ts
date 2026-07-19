@@ -25,6 +25,7 @@ export function createAccountingRouter(db: PrismaClient) {
   router.post("/transactions", requirePermission(PERMISSIONS.ACCOUNTING_MANAGE), controller.financialTransaction);
   router.post("/cutover", requirePermission(PERMISSIONS.ACCOUNTING_PERIODS), controller.cutover);
   router.get("/reports/general-ledger/:accountId", requirePermission(PERMISSIONS.FINANCIAL_REPORTS), controller.generalLedger);
+  router.get("/reports/cash-in-hand", requirePermission(PERMISSIONS.FINANCIAL_REPORTS), controller.cashInHand);
   router.get("/reports/trial-balance", requirePermission(PERMISSIONS.FINANCIAL_REPORTS), controller.trialBalance);
   router.get("/reports/profit-loss", requirePermission(PERMISSIONS.FINANCIAL_REPORTS), controller.profitAndLoss);
   router.get("/reports/balance-sheet", requirePermission(PERMISSIONS.FINANCIAL_REPORTS), controller.balanceSheet);

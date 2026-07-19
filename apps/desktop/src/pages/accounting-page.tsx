@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { BookOpen, Building2, CalendarRange, Landmark, Plus, RefreshCcw, Scale, WalletCards } from "lucide-react";
 import { apiRequest } from "@/api/client";
 import { Button } from "@/components/ui/button";
@@ -11,11 +11,12 @@ type Period = { id: string; name: string; startDate: string; endDate: string; st
 type Bank = { id: string; name: string; bankName: string | null; accountNumber: string | null; glAccount: Account };
 type Journal = { id: string; entryNumber: string; transactionDate: string; description: string; sourceType: string; status: string; totalDebit: string; lines: Array<{ id: string; account: Account; debit: string; credit: string; memo: string | null }> };
 type TrialBalance = { rows: Array<Account & { debit: string; credit: string }>; totals: { debit: string; credit: string; balanced: boolean } };
-type ProfitLoss = { revenue: string; contraRevenue: string; netRevenue: string; expenses: string; netProfit: string; rows: Array<Account & { balance: string; side: string }> };
+type ProfitLoss = { revenue: string; contraRevenue: string; netRevenue: string; costOfGoodsSold: string; grossProfit: string; otherIncome: string; operatingExpenses: string; expenses: string; netProfit: string; grossMarginPercent: number; netMarginPercent: number; rows: Array<Account & { balance: string; side: string }> };
 type BalanceSheet = { assets: string; liabilities: string; totalEquity: string; currentEarnings: string; balanced: boolean; rows: Array<Account & { balance: string; side: string }> };
 type CashFlow = { operating: string; investing: string; financing: string; netCashChange: string };
 type ReportKey = "trial-balance" | "profit-loss" | "balance-sheet" | "cash-flow";
 type ReportData = TrialBalance | ProfitLoss | BalanceSheet | CashFlow;
+type LoadedReport = { key: ReportKey; data: ReportData };
 
 const today = () => new Date().toISOString().slice(0, 10);
 const monthStart = () => `${today().slice(0, 8)}01`;
@@ -26,12 +27,27 @@ export function AccountingPage() {
   const [tab, setTab] = useState<"reports" | "journals" | "accounts" | "periods" | "banking">("reports");
   const [accounts, setAccounts] = useState<Account[]>([]), [periods, setPeriods] = useState<Period[]>([]), [banks, setBanks] = useState<Bank[]>([]), [journals, setJournals] = useState<Journal[]>([]);
   const [from, setFrom] = useState(monthStart()), [to, setTo] = useState(today()), [report, setReport] = useState<ReportKey>("trial-balance");
-  const [reportData, setReportData] = useState<ReportData | null>(null);
+  const [reportData, setReportData] = useState<LoadedReport | null>(null);
   const [error, setError] = useState(""), [busy, setBusy] = useState(false);
+  const reportRequestId = useRef(0);
 
   const loadMasters = async () => { const [a, p, b] = await Promise.all([apiRequest<Account[]>("/accounting/accounts?includeInactive=true", {}, token), apiRequest<Period[]>("/accounting/periods", {}, token), apiRequest<Bank[]>("/accounting/banks", {}, token)]); setAccounts(a); setPeriods(p); setBanks(b); };
   const loadJournals = async () => setJournals(await apiRequest<Journal[]>(`/accounting/journals?from=${from}&to=${to}`, {}, token));
-  const loadReport = async () => { setBusy(true); setError(""); try { setReportData(await apiRequest(`/accounting/reports/${report}?from=${from}&to=${to}`, {}, token)); } catch (value) { setError(value instanceof Error ? value.message : "Could not load the financial report."); } finally { setBusy(false); } };
+  const loadReport = async () => {
+    const requestId = ++reportRequestId.current;
+    const requestedReport = report;
+    setBusy(true);
+    setError("");
+    setReportData(null);
+    try {
+      const data = await apiRequest<ReportData>(`/accounting/reports/${requestedReport}?from=${from}&to=${to}`, {}, token);
+      if (requestId === reportRequestId.current) setReportData({ key: requestedReport, data });
+    } catch (value) {
+      if (requestId === reportRequestId.current) setError(value instanceof Error ? value.message : "Could not load the financial report.");
+    } finally {
+      if (requestId === reportRequestId.current) setBusy(false);
+    }
+  };
   useEffect(() => { void loadMasters().catch((value) => setError(value instanceof Error ? value.message : "Could not load accounting setup.")); }, []);
   useEffect(() => { if (tab === "journals") void loadJournals(); }, [tab, from, to]);
   useEffect(() => { if (tab === "reports") void loadReport(); }, [tab, report, from, to]);
@@ -41,7 +57,7 @@ export function AccountingPage() {
     <header className="flex flex-wrap items-end justify-between gap-4"><div><p className="mb-1 text-xs font-bold uppercase tracking-[.18em] text-primary">Owner controls</p><h1 className="m-0 text-3xl font-bold">Accounting</h1><p className="mt-1 text-sm text-muted-foreground">Balanced journals, accounts, periods, banking, and financial statements.</p></div><div className="rounded-2xl border bg-white px-4 py-3 text-sm shadow-sm"><span className="text-muted-foreground">Current period</span><strong className="ml-3">{openPeriod?.name ?? "No open period"}</strong></div></header>
     {error && <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
     <nav className="flex flex-wrap gap-2 rounded-2xl border bg-white p-2 shadow-sm">{([['reports','Financial reports',Scale],['journals','Journal',BookOpen],['accounts','Chart of accounts',Landmark],['periods','Periods',CalendarRange],['banking','Banking & capital',WalletCards]] as const).map(([key,label,Icon]) => <Button key={key} variant={tab === key ? "default" : "ghost"} className="gap-2 rounded-xl" onClick={() => setTab(key)}><Icon size={16}/>{label}</Button>)}</nav>
-    {tab === "reports" && <ReportsView report={report} setReport={setReport} from={from} to={to} setFrom={setFrom} setTo={setTo} data={reportData} busy={busy} reload={loadReport}/>} 
+    {tab === "reports" && <ReportsView report={report} setReport={setReport} from={from} to={to} setFrom={setFrom} setTo={setTo} data={reportData?.key === report ? reportData.data : null} busy={busy} reload={loadReport}/>}
     {tab === "journals" && <JournalsView journals={journals} from={from} to={to} setFrom={setFrom} setTo={setTo}/>} 
     {tab === "accounts" && <AccountsView accounts={accounts} token={token} reload={loadMasters} setError={setError}/>} 
     {tab === "periods" && <PeriodsView periods={periods} token={token} reload={loadMasters} setError={setError}/>} 
@@ -51,11 +67,22 @@ export function AccountingPage() {
 
 function DateRange({ from, to, setFrom, setTo }: { from: string; to: string; setFrom: (v: string) => void; setTo: (v: string) => void }) { return <div className="flex gap-2"><Input type="date" value={from} onChange={(e) => setFrom(e.target.value)}/><Input type="date" value={to} onChange={(e) => setTo(e.target.value)}/></div>; }
 
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null;
+const hasRows = (value: unknown): value is TrialBalance | ProfitLoss | BalanceSheet => isRecord(value) && Array.isArray(value["rows"]);
+const isTrialBalance = (value: unknown): value is TrialBalance => {
+  if (!isRecord(value) || !Array.isArray(value["rows"]) || !isRecord(value["totals"])) return false;
+  const totals = value["totals"];
+  return typeof totals["debit"] === "string" && typeof totals["credit"] === "string" && typeof totals["balanced"] === "boolean";
+};
+const isProfitLoss = (value: unknown): value is ProfitLoss => isRecord(value) && Array.isArray(value["rows"]) && typeof value["netProfit"] === "string";
+const isBalanceSheet = (value: unknown): value is BalanceSheet => isRecord(value) && Array.isArray(value["rows"]) && typeof value["assets"] === "string";
+const isCashFlow = (value: unknown): value is CashFlow => isRecord(value) && typeof value["netCashChange"] === "string";
+
 function ReportsView({ report, setReport, from, to, setFrom, setTo, data, busy, reload }: { report: ReportKey; setReport: (v: ReportKey) => void; from: string; to: string; setFrom: (v: string) => void; setTo: (v: string) => void; data: ReportData | null; busy: boolean; reload: () => Promise<void> }) {
-  const profit = report === "profit-loss" ? data as ProfitLoss | null : null, balance = report === "balance-sheet" ? data as BalanceSheet | null : null, flow = report === "cash-flow" ? data as CashFlow | null : null, trial = report === "trial-balance" ? data as TrialBalance | null : null;
-  const cards: Array<[string, string]> = profit ? [["Net revenue", profit.netRevenue], ["Expenses", profit.expenses], ["Net profit", profit.netProfit]] : balance ? [["Assets", balance.assets], ["Liabilities", balance.liabilities], ["Equity", balance.totalEquity]] : flow ? [["Operating", flow.operating], ["Investing", flow.investing], ["Net change", flow.netCashChange]] : trial ? [["Total debits", trial.totals.debit], ["Total credits", trial.totals.credit], ["Balanced", trial.totals.balanced ? "Yes" : "No"]] : [];
-  const rows = "rows" in (data ?? {}) ? (data as TrialBalance | ProfitLoss | BalanceSheet).rows : [];
-  return <div className="space-y-4"><Card className="flex flex-wrap items-center justify-between gap-3 rounded-2xl p-4"><div className="flex flex-wrap gap-2">{([["trial-balance","Trial balance"],["profit-loss","Profit & loss"],["balance-sheet","Balance sheet"],["cash-flow","Cash flow"]] as Array<[ReportKey,string]>).map(([key,label]) => <Button key={key} size="sm" variant={report === key ? "secondary" : "ghost"} className="rounded-xl" onClick={() => setReport(key)}>{label}</Button>)}</div><div className="flex items-center gap-2"><DateRange from={from} to={to} setFrom={setFrom} setTo={setTo}/><Button variant="outline" className="rounded-xl" disabled={busy} onClick={() => void reload()}><RefreshCcw size={15}/></Button></div></Card><div className="grid gap-3 md:grid-cols-3">{cards.map(([label,value]) => <Card key={label} className="rounded-2xl p-5"><p className="m-0 text-sm text-muted-foreground">{label}</p><strong className="mt-2 block text-2xl">{label === "Balanced" ? value : money(value ?? 0)}</strong></Card>)}</div>{rows.length > 0 && <Card className="overflow-hidden rounded-2xl"><table className="w-full text-sm"><thead><tr className="bg-slate-50 text-left text-xs uppercase text-slate-500"><th className="p-4">Code</th><th>Account</th><th>Type</th><th className="p-4 text-right">Debit / balance</th><th className="p-4 text-right">Credit</th></tr></thead><tbody>{rows.map((row) => <tr key={row.id} className="border-t"><td className="p-4 font-mono">{row.code}</td><td>{row.name}</td><td>{row.type.replaceAll('_',' ')}</td><td className="p-4 text-right">{money("debit" in row ? row.debit : row.balance)}</td><td className="p-4 text-right">{"credit" in row ? money(row.credit) : row.side}</td></tr>)}</tbody></table></Card>}</div>;
+  const profit = report === "profit-loss" && isProfitLoss(data) ? data : null, balance = report === "balance-sheet" && isBalanceSheet(data) ? data : null, flow = report === "cash-flow" && isCashFlow(data) ? data : null, trial = report === "trial-balance" && isTrialBalance(data) ? data : null;
+  const cards: Array<[string, string]> = profit ? [["Net revenue", profit.netRevenue], ["Cost of goods sold", profit.costOfGoodsSold], ["Gross profit", profit.grossProfit], ["Operating expenses", profit.operatingExpenses], ["Other income", profit.otherIncome], ["Net profit", profit.netProfit]] : balance ? [["Assets", balance.assets], ["Liabilities", balance.liabilities], ["Equity", balance.totalEquity]] : flow ? [["Operating", flow.operating], ["Investing", flow.investing], ["Net change", flow.netCashChange]] : trial ? [["Total debits", trial.totals.debit], ["Total credits", trial.totals.credit], ["Balanced", trial.totals.balanced ? "Yes" : "No"]] : [];
+  const rows = hasRows(data) ? data.rows : [];
+  return <div className="space-y-4"><Card className="flex flex-wrap items-center justify-between gap-3 rounded-2xl p-4"><div className="flex flex-wrap gap-2">{([["trial-balance","Trial balance"],["profit-loss","Profit & loss"],["balance-sheet","Balance sheet"],["cash-flow","Cash flow"]] as Array<[ReportKey,string]>).map(([key,label]) => <Button key={key} size="sm" variant={report === key ? "outline" : "ghost"} className="rounded-xl" onClick={() => setReport(key)}>{label}</Button>)}</div><div className="flex items-center gap-2"><DateRange from={from} to={to} setFrom={setFrom} setTo={setTo}/><Button variant="outline" className="rounded-xl" disabled={busy} onClick={() => void reload()}><RefreshCcw size={15}/></Button></div></Card>{busy && !data ? <Card className="rounded-2xl p-8 text-center text-sm text-muted-foreground">Loading financial report…</Card> : <><div className="grid gap-3 md:grid-cols-3">{cards.map(([label,value]) => <Card key={label} className="rounded-2xl p-5"><p className="m-0 text-sm text-muted-foreground">{label}</p><strong className="mt-2 block text-2xl">{label === "Balanced" ? value : money(value ?? 0)}</strong></Card>)}</div>{rows.length > 0 && <Card className="overflow-hidden rounded-2xl"><table className="w-full text-sm"><thead><tr className="bg-slate-50 text-left text-xs uppercase text-slate-500"><th className="p-4">Code</th><th>Account</th><th>Type</th><th className="p-4 text-right">Debit / balance</th><th className="p-4 text-right">Credit</th></tr></thead><tbody>{rows.map((row) => <tr key={row.id} className="border-t"><td className="p-4 font-mono">{row.code}</td><td>{row.name}</td><td>{row.type.replaceAll('_',' ')}</td><td className="p-4 text-right">{money("debit" in row ? row.debit : row.balance)}</td><td className="p-4 text-right">{"credit" in row ? money(row.credit) : row.side}</td></tr>)}</tbody></table></Card>}</>}</div>;
 }
 
 function JournalsView({ journals, from, to, setFrom, setTo }: { journals: Journal[]; from: string; to: string; setFrom: (v: string) => void; setTo: (v: string) => void }) { const [expanded, setExpanded] = useState<string | null>(null); return <Card className="overflow-hidden rounded-2xl"><div className="flex items-center justify-between gap-3 border-b p-4"><div><h2 className="m-0 text-lg font-semibold">Posted journals</h2><p className="m-0 text-xs text-muted-foreground">Source-linked entries are reversed from their original transaction.</p></div><DateRange from={from} to={to} setFrom={setFrom} setTo={setTo}/></div><div className="divide-y">{journals.map((journal) => <div key={journal.id}><button className="grid w-full grid-cols-[130px_130px_1fr_130px] items-center gap-3 p-4 text-left hover:bg-slate-50" onClick={() => setExpanded(expanded === journal.id ? null : journal.id)}><span className="font-mono text-xs">{journal.entryNumber}</span><span className="text-sm">{journal.transactionDate.slice(0,10)}</span><span><strong className="block text-sm">{journal.description}</strong><small className="text-muted-foreground">{journal.sourceType.replaceAll('_',' ')}</small></span><strong className="text-right">{money(journal.totalDebit)}</strong></button>{expanded === journal.id && <div className="bg-slate-50 px-8 py-3">{journal.lines.map((line) => <div key={line.id} className="grid grid-cols-[1fr_130px_130px] border-b border-white py-2 text-sm"><span>{line.account.code} — {line.account.name}</span><span className="text-right">{Number(line.debit) ? money(line.debit) : "—"}</span><span className="text-right">{Number(line.credit) ? money(line.credit) : "—"}</span></div>)}</div>}</div>)}{!journals.length && <p className="p-8 text-center text-muted-foreground">No journals in this date range.</p>}</div></Card>; }
