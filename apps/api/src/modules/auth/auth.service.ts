@@ -1,7 +1,7 @@
 import argon2 from "argon2";
 import { randomBytes } from "node:crypto";
 import type { Prisma, PrismaClient } from "@prisma/client";
-import type { AuthUser, LoginInput, LoginResponse, PermissionCode, RoleCode } from "@oil-agency/shared";
+import { ROLE_PERMISSIONS, type AuthUser, type LoginInput, type LoginResponse, type PermissionCode, type RoleCode } from "@oil-agency/shared";
 import { env } from "../../config/env.js";
 import { HttpError } from "../../lib/http-error.js";
 import { createSessionToken } from "../../lib/security.js";
@@ -26,12 +26,14 @@ export class AuthService {
   }
 
   private toAuthUser(user: UserWithRole): AuthUser {
+    const role = user.role.code as RoleCode;
+    const permissions = [...new Set<PermissionCode>([...ROLE_PERMISSIONS[role], ...user.role.permissions.map(({ permission }) => permission.code as PermissionCode)])];
     return {
       id: user.id,
       username: user.username,
       displayName: user.displayName,
-      role: user.role.code as RoleCode,
-      permissions: user.role.permissions.map(({ permission }) => permission.code as PermissionCode),
+      role,
+      permissions,
       cashierDiscountLimitBps: user.cashierDiscountLimitBps,
     };
   }
