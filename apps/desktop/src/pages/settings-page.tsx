@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/cn";
 import { useAuthStore } from "@/stores/auth-store";
+import { useBusinessStore } from "@/stores/business-store";
 
 type Tab = "agency" | "behavior" | "data";
 type ClientSettings = { business: BusinessSetting; shortcuts: ShortcutSetting; printing: PrintingSetting };
@@ -17,6 +18,7 @@ type BackupStatus = { createdAt: string; createdBy: string; details: { fileName?
 
 export function SettingsPage() {
   const token = useAuthStore((state) => state.token)!;
+  const setCurrentBusiness = useBusinessStore((state) => state.setBusiness);
   const [tab, setTab] = useState<Tab>("agency");
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
@@ -46,7 +48,7 @@ export function SettingsPage() {
 
   async function save<T>(key: string, value: T, success: string) {
     setError(""); setMessage("");
-    try { await apiRequest(`/settings/${key}`, { method: "PUT", body: JSON.stringify({ value }) }, token); setMessage(success); }
+    try { await apiRequest(`/settings/${key}`, { method: "PUT", body: JSON.stringify({ value }) }, token); if (key === "business") setCurrentBusiness(value as BusinessSetting); setMessage(success); }
     catch (saveError) { setError(saveError instanceof ApiError ? saveError.message : "Could not save settings."); }
   }
 

@@ -34,6 +34,7 @@
     "react-router-dom": "^7.6.0",
     "tailwind-merge": "^3.3.0",
     "zod": "^3.25.28",
+    "write-excel-file": "^2.3.10",
     "zustand": "^5.0.5"
   },
   "devDependencies": {
