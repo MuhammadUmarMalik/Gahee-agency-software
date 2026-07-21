@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import type { AppDbClient } from "../../lib/db.js";
 import { Router } from "express";
 import { z } from "zod";
 import { backupSettingSchema, businessSettingSchema, DEFAULT_BACKUP_SETTING, DEFAULT_BUSINESS_SETTING, DEFAULT_PRINTING_SETTING, DEFAULT_SHORTCUT_SETTING, printingSettingSchema, shortcutSettingSchema } from "@oil-agency/shared";
@@ -10,13 +10,14 @@ const keySchema = z.string().regex(/^[a-z][a-z0-9_.-]{0,63}$/);
 const settingInputSchema = z.object({ value: z.unknown() });
 const backupEventSchema = z.object({ fileName: z.string().trim().min(1).max(255), sizeBytes: z.number().int().positive().max(10_000_000_000) });
 const settingSchemas = { business: businessSettingSchema, shortcuts: shortcutSettingSchema, printing: printingSettingSchema, backup: backupSettingSchema } as const;
+type SettingJsonRow = { key: string; valueJson: string; updatedAt: Date };
 
 function parseValue(valueJson: string): unknown {
   try { return JSON.parse(valueJson); }
   catch { return null; }
 }
 
-export function createSettingsRouter(db: PrismaClient): Router {
+export function createSettingsRouter(db: AppDbClient): Router {
   const router = Router();
   router.use(authenticate(db));
 
@@ -34,7 +35,7 @@ export function createSettingsRouter(db: PrismaClient): Router {
 
   router.get("/", async (_req, res) => {
     const settings = await db.setting.findMany({ where: { isSecret: false }, orderBy: { key: "asc" } });
-    res.json({ settings: settings.map(({ key, valueJson, updatedAt }) => ({ key, value: parseValue(valueJson), updatedAt })) });
+    res.json({ settings: settings.map(({ key, valueJson, updatedAt }: SettingJsonRow) => ({ key, value: parseValue(valueJson), updatedAt })) });
   });
 
   router.get("/backup-status", async (_req, res) => {
@@ -56,9 +57,9 @@ export function createSettingsRouter(db: PrismaClient): Router {
     const validated = schema.parse(value);
     const serialized = JSON.stringify(validated);
     if (serialized.length > 1_500_000) throw new HttpError(400, "INVALID_SETTING", "Setting value is too large.");
-    const before = await db.setting.findUnique({ where: { key } });
-    if (before?.isSecret) throw new HttpError(403, "SECRET_SETTING", "Secret settings cannot be changed through this endpoint.");
     const setting = await db.$transaction(async (tx) => {
+      const before = await tx.setting.findUnique({ where: { key } });
+      if (before?.isSecret) throw new HttpError(403, "SECRET_SETTING", "Secret settings cannot be changed through this endpoint.");
       const updated = await tx.setting.upsert({ where: { key }, update: { valueJson: serialized }, create: { key, valueJson: serialized } });
       await tx.auditLog.create({ data: { userId: req.auth!.id, action: before ? "UPDATE" : "CREATE", entityType: "Setting", entityId: key, ...(before ? { beforeJson: before.valueJson } : {}), afterJson: serialized } });
       return updated;

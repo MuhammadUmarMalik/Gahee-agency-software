@@ -1,16 +1,21 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Oil Agency POS">
   <defs>
-    <linearGradient id="background" x1="72" y1="48" x2="440" y2="464" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#059669"/>
-      <stop offset="1" stop-color="#065f46"/>
+    <linearGradient id="bg" x1="80" y1="52" x2="438" y2="460" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0b8f68"/>
+      <stop offset="1" stop-color="#07533f"/>
     </linearGradient>
-    <linearGradient id="drop" x1="190" y1="122" x2="330" y2="388" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#fef3c7"/>
-      <stop offset="1" stop-color="#fbbf24"/>
+    <linearGradient id="oil" x1="192" y1="126" x2="326" y2="404" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffe9a3"/>
+      <stop offset="0.52" stop-color="#f9c846"/>
+      <stop offset="1" stop-color="#e99a16"/>
     </linearGradient>
+    <filter id="shadow" x="-30%" y="-30%" width="160%" height="170%">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#033b2d" flood-opacity=".32"/>
+    </filter>
   </defs>
-  <rect width="512" height="512" rx="112" fill="url(#background)"/>
-  <path d="M256 82c-18 39-112 142-112 224 0 68 50 124 112 124s112-56 112-124C368 224 274 121 256 82Z" fill="url(#drop)"/>
-  <path d="M217 344c17 22 48 31 75 17 17-9 29-25 34-45" fill="none" stroke="#fff" stroke-linecap="round" stroke-width="24" opacity=".9"/>
-  <circle cx="404" cy="108" r="42" fill="#fff" opacity=".16"/>
+  <rect x="20" y="20" width="472" height="472" rx="112" fill="url(#bg)"/>
+  <path d="M256 92c-19 43-116 150-116 233 0 70 52 127 116 127s116-57 116-127c0-83-97-190-116-233Z" fill="url(#oil)" filter="url(#shadow)"/>
+  <path d="M216 202c-27 40-48 82-48 120" fill="none" stroke="#fff" stroke-width="22" stroke-linecap="round" opacity=".86"/>
+  <path d="M318 350c-12 30-38 50-69 52" fill="none" stroke="#fff7dd" stroke-width="14" stroke-linecap="round" opacity=".58"/>
+  <circle cx="404" cy="108" r="34" fill="#fff" opacity=".1"/>
 </svg>

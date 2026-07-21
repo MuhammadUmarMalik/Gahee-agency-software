@@ -1,18 +1,60 @@
 import { randomInt } from "node:crypto";
-import { Prisma, type PrismaClient } from "@prisma/client";
-import { isIndividualUnit, isOuterPackUnit, type CreateProductInput, type GenerateSkuQuery, type PackingMode, type ProductDto, type ProductListQuery, type UpdateProductInput } from "@oil-agency/shared";
+import type { AppDbClient, TransactionClient, PaymentMethod, SourceType, StockMovementType, BackupKind, JobType, JobStatus, CashDirection, CashbookEntryType, ReturnCondition } from "../../lib/db.js";
+import { coerceSqliteDate } from "../../lib/db.js";
+import { PRODUCT_TYPES, SIZE_UNITS, isIndividualUnit, isOuterPackUnit, type CreateProductInput, type GenerateSkuQuery, type PackingMode, type ProductDto, type ProductListQuery, type ProductType, type SizeUnit, type UpdateProductInput } from "@oil-agency/shared";
+import { isUniqueConstraintError } from "../../lib/db-errors.js";
 import { HttpError } from "../../lib/http-error.js";
 import { AccountingPostingService } from "../accounting/posting.service.js";
+import { applyStockMovement } from "../inventory/stock-engine.js";
 
 const productInclude = {
   category: { select: { id: true, name: true } },
   brand: { select: { id: true, name: true } },
   baseUnit: { select: { id: true, name: true, symbol: true } },
   packings: { include: { unit: { select: { id: true, name: true, symbol: true } } }, orderBy: { unitsPerPack: "asc" as const } },
-} satisfies Prisma.ProductInclude;
+} satisfies Record<string, unknown>;
 
-type ProductRecord = Prisma.ProductGetPayload<{ include: typeof productInclude }>;
-type Transaction = Prisma.TransactionClient;
+type ProductPackingRecord = {
+  id?: string;
+  name: string;
+  unitsPerPack: number;
+  isPurchaseUnit: boolean;
+  isSaleUnit: boolean;
+  unit: { id: string; name: string; symbol: string };
+};
+type ProductRecord = {
+  id: string;
+  name: string;
+  sku: string;
+  barcode: string | null;
+  productType: string;
+  sizeValue: number | null;
+  sizeUnit: string | null;
+  category: { id: string; name: string } | null;
+  brand: { id: string; name: string } | null;
+  baseUnit: { id: string; name: string; symbol: string };
+  packings: ProductPackingRecord[];
+  purchasePriceMinor: number;
+  retailPriceMinor: number;
+  wholesalePriceMinor: number;
+  minimumPriceMinor: number;
+  taxRateBps: number;
+  fbrHsCode: string | null;
+  fbrUom: string;
+  fbrSaleType: string;
+  fbrFixedNotifiedValueMinor: number;
+  fbrSroScheduleNo: string | null;
+  fbrSroItemSerialNo: string | null;
+  reorderLevelBaseQty: number;
+  stockOnHandBaseQty: number;
+  rackLocation: string | null;
+  notes: string | null;
+  isActive: boolean;
+  deletedAt?: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+type Transaction = TransactionClient;
 
 export function moneyToMinor(value: string): number {
   const [whole = "0", fraction = ""] = value.split(".");
@@ -24,8 +66,17 @@ export function moneyToMinor(value: string): number {
 export function minorToMoney(value: number): string { const sign = value < 0 ? "-" : ""; const absolute = Math.abs(value); return `${sign}${Math.trunc(absolute / 100)}.${String(absolute % 100).padStart(2, "0")}`; }
 export function percentToBps(value: string): number { return moneyToMinor(value); }
 export function bpsToPercent(value: number): string { return minorToMoney(value); }
+function productType(value: string): ProductType {
+  return PRODUCT_TYPES.includes(value as ProductType) ? value as ProductType : "OTHER";
+}
+function sizeUnit(value: string | null): SizeUnit | null {
+  return value && SIZE_UNITS.includes(value as SizeUnit) ? value as SizeUnit : null;
+}
 
 export function calculateOpeningBaseQuantity(packQuantity: number, baseQuantity: number, unitsPerPack: number): number {
+  for (const value of [packQuantity, baseQuantity]) if (!Number.isSafeInteger(value) || value < 0) throw new HttpError(400, "INVALID_OPENING_STOCK", "Opening stock quantities must be non-negative whole numbers.");
+  if (!Number.isSafeInteger(unitsPerPack) || unitsPerPack < 1) throw new HttpError(400, "INVALID_PACKING", "Units per pack must be a positive whole number.");
+  if (unitsPerPack > 1 && baseQuantity >= unitsPerPack) throw new HttpError(400, "OPENING_LOOSE_QUANTITY_TOO_LARGE", `Loose opening stock must be less than ${unitsPerPack}. Increase the pack quantity instead.`);
   const quantity = packQuantity * unitsPerPack + baseQuantity;
   if (!Number.isSafeInteger(quantity) || quantity > 100_000_000) throw new HttpError(400, "OPENING_STOCK_TOO_LARGE", "Opening stock exceeds the supported limit.");
   return quantity;
@@ -42,9 +93,9 @@ function toDto(product: ProductRecord): ProductDto {
     name: product.name,
     sku: product.sku,
     barcode: product.barcode ?? "",
-    productType: product.productType,
+    productType: productType(product.productType),
     sizeValue: product.sizeValue,
-    sizeUnit: product.sizeUnit,
+    sizeUnit: sizeUnit(product.sizeUnit),
     category: product.category,
     brand: product.brand,
     baseUnit: product.baseUnit,
@@ -57,21 +108,27 @@ function toDto(product: ProductRecord): ProductDto {
     wholesalePrice: minorToMoney(product.wholesalePriceMinor),
     minimumPrice: minorToMoney(product.minimumPriceMinor),
     taxRatePercent: bpsToPercent(product.taxRateBps),
+    fbrHsCode: product.fbrHsCode ?? "",
+    fbrUom: product.fbrUom,
+    fbrSaleType: product.fbrSaleType,
+    fbrFixedNotifiedValue: minorToMoney(product.fbrFixedNotifiedValueMinor),
+    fbrSroScheduleNo: product.fbrSroScheduleNo ?? "",
+    fbrSroItemSerialNo: product.fbrSroItemSerialNo ?? "",
     reorderLevelBaseQty: product.reorderLevelBaseQty,
     stockOnHandBaseQty: product.stockOnHandBaseQty,
     rackLocation: product.rackLocation ?? "",
     notes: product.notes ?? "",
     isActive: product.isActive,
-    createdAt: product.createdAt.toISOString(),
-    updatedAt: product.updatedAt.toISOString(),
+    createdAt: coerceSqliteDate(product.createdAt).toISOString(),
+    updatedAt: coerceSqliteDate(product.updatedAt).toISOString(),
   };
 }
 
 export class ProductService {
-  constructor(private readonly db: PrismaClient) {}
+  constructor(private readonly db: AppDbClient) {}
 
   async list(query: ProductListQuery) {
-    const where: Prisma.ProductWhereInput = {
+    const where: Record<string, unknown> = {
       deletedAt: null,
       ...(query.active === "ACTIVE" ? { isActive: true } : query.active === "INACTIVE" ? { isActive: false } : {}),
       ...(query.categoryId ? { categoryId: query.categoryId } : {}),
@@ -134,6 +191,7 @@ export class ProductService {
 
   async create(input: CreateProductInput, actorId: string): Promise<ProductDto> {
     await this.validateReferences(input);
+    this.validatePrices(input);
     const sku = input.sku || await this.generateSku({ name: input.name, ...(input.sizeValue ? { sizeValue: input.sizeValue } : {}), ...(input.sizeUnit ? { sizeUnit: input.sizeUnit } : {}), baseUnitId: input.baseUnitId });
     await this.validateIdentifiers(sku, input.barcode);
     const openingQuantity = calculateOpeningBaseQuantity(input.openingStockPackQty, input.openingStockBaseQty, input.unitsPerPack);
@@ -144,16 +202,19 @@ export class ProductService {
           data: {
             name: input.name, sku, barcode: input.barcode || null, categoryId: input.categoryId, brandId: input.brandId,
             baseUnitId: input.baseUnitId, productType: input.productType, sizeValue: input.sizeValue, sizeUnit: input.sizeUnit,
-            purchasePriceMinor: moneyToMinor(input.purchasePrice), averageCostMinor: openingQuantity > 0 ? moneyToMinor(input.purchasePrice) : 0, inventoryValueMinor: openingQuantity * moneyToMinor(input.purchasePrice), retailPriceMinor: moneyToMinor(input.retailPrice),
+            purchasePriceMinor: moneyToMinor(input.purchasePrice), averageCostMinor: 0, inventoryValueMinor: 0, retailPriceMinor: moneyToMinor(input.retailPrice),
             wholesalePriceMinor: moneyToMinor(input.wholesalePrice), minimumPriceMinor: moneyToMinor(input.minimumPrice), taxRateBps: percentToBps(input.taxRatePercent),
-            reorderLevelBaseQty: input.reorderLevelBaseQty, stockOnHandBaseQty: openingQuantity, rackLocation: input.rackLocation || null,
+            fbrHsCode: input.fbrHsCode || null, fbrUom: input.fbrUom, fbrSaleType: input.fbrSaleType,
+            fbrFixedNotifiedValueMinor: moneyToMinor(input.fbrFixedNotifiedValue), fbrSroScheduleNo: input.fbrSroScheduleNo || null, fbrSroItemSerialNo: input.fbrSroItemSerialNo || null,
+            reorderLevelBaseQty: input.reorderLevelBaseQty, stockOnHandBaseQty: 0, rackLocation: input.rackLocation || null,
             notes: input.notes || null, isActive: input.isActive,
             packings: { create: packingRows(input, baseUnit.name, packUnit.name) },
           },
           include: productInclude,
         });
         if (openingQuantity > 0) await this.createOpeningStock(tx, product, openingQuantity, actorId);
-        const dto = toDto(product);
+        const saved = await tx.product.findFirstOrThrow({ where: { id: product.id }, include: productInclude });
+        const dto = toDto(saved);
         await tx.auditLog.create({ data: { userId: actorId, action: "CREATE", entityType: "Product", entityId: product.id, afterJson: JSON.stringify(dto) } });
         return dto;
       });
@@ -162,6 +223,7 @@ export class ProductService {
 
   async update(id: string, input: UpdateProductInput, actorId: string): Promise<ProductDto> {
     await this.validateReferences(input);
+    this.validatePrices(input);
     const sku = input.sku || await this.generateSku({ name: input.name, ...(input.sizeValue ? { sizeValue: input.sizeValue } : {}), ...(input.sizeUnit ? { sizeUnit: input.sizeUnit } : {}), baseUnitId: input.baseUnitId });
     await this.validateIdentifiers(sku, input.barcode, id);
     const before = await this.db.product.findFirst({ where: { id, deletedAt: null }, include: productInclude });
@@ -181,6 +243,8 @@ export class ProductService {
             baseUnitId: input.baseUnitId, productType: input.productType, sizeValue: input.sizeValue, sizeUnit: input.sizeUnit,
             purchasePriceMinor: moneyToMinor(input.purchasePrice), retailPriceMinor: moneyToMinor(input.retailPrice),
             wholesalePriceMinor: moneyToMinor(input.wholesalePrice), minimumPriceMinor: moneyToMinor(input.minimumPrice), taxRateBps: percentToBps(input.taxRatePercent),
+            fbrHsCode: input.fbrHsCode || null, fbrUom: input.fbrUom, fbrSaleType: input.fbrSaleType,
+            fbrFixedNotifiedValueMinor: moneyToMinor(input.fbrFixedNotifiedValue), fbrSroScheduleNo: input.fbrSroScheduleNo || null, fbrSroItemSerialNo: input.fbrSroItemSerialNo || null,
             reorderLevelBaseQty: input.reorderLevelBaseQty, rackLocation: input.rackLocation || null, notes: input.notes || null, isActive: input.isActive,
             packings: { create: packingRows(input, baseUnit.name, packUnit.name) },
           },
@@ -196,11 +260,32 @@ export class ProductService {
   async remove(id: string, actorId: string): Promise<void> {
     const product = await this.db.product.findFirst({ where: { id, deletedAt: null }, include: productInclude });
     if (!product) throw new HttpError(404, "PRODUCT_NOT_FOUND", "Product was not found.");
-    if (product.stockOnHandBaseQty !== 0) throw new HttpError(409, "PRODUCT_HAS_STOCK", "A product with stock on hand cannot be deleted.");
-    await this.db.$transaction([
-      this.db.product.update({ where: { id }, data: { isActive: false, deletedAt: new Date() } }),
-      this.db.auditLog.create({ data: { userId: actorId, action: "SOFT_DELETE", entityType: "Product", entityId: id, beforeJson: JSON.stringify(toDto(product)) } }),
-    ]);
+    const references = await this.referenceCounts(id);
+    const isReferenced = Object.values(references).some((count) => count > 0);
+    if (product.stockOnHandBaseQty !== 0 || isReferenced) {
+      await this.db.$transaction(async (tx) => {
+        await tx.product.update({ where: { id }, data: { isActive: false, deletedAt: new Date(), updatedAt: new Date() } });
+        await tx.auditLog.create({ data: { userId: actorId, action: "SOFT_DELETE", entityType: "Product", entityId: id, beforeJson: JSON.stringify(toDto(product)), afterJson: JSON.stringify({ references }) } });
+      });
+      return;
+    }
+    await this.db.$transaction(async (tx) => {
+      await tx.productPacking.deleteMany({ where: { productId: id } });
+      await tx.product.delete({ where: { id } });
+      await tx.auditLog.create({ data: { userId: actorId, action: "DELETE", entityType: "Product", entityId: id, beforeJson: JSON.stringify(toDto(product)) } });
+    });
+  }
+
+  async restore(id: string, actorId: string): Promise<ProductDto> {
+    const product = await this.db.product.findFirst({ where: { id }, include: productInclude });
+    if (!product) throw new HttpError(404, "PRODUCT_NOT_FOUND", "Product was not found.");
+    if (!product.deletedAt) return toDto(product);
+    const restored = await this.db.$transaction(async (tx) => {
+      const value = await tx.product.update({ where: { id }, data: { isActive: true, deletedAt: null, updatedAt: new Date() }, include: productInclude });
+      await tx.auditLog.create({ data: { userId: actorId, action: "RESTORE", entityType: "Product", entityId: id, beforeJson: JSON.stringify(toDto(product)), afterJson: JSON.stringify(toDto(value)) } });
+      return value;
+    });
+    return toDto(restored);
   }
 
   private async validateReferences(input: UpdateProductInput) {
@@ -214,11 +299,21 @@ export class ProductService {
     if (units.length !== (individualOnly ? 1 : 2)) throw new HttpError(400, "INVALID_UNIT", individualOnly ? "Select a valid individual item." : "Select a valid individual item and a different outer pack.");
     const baseUnit = units.find((unit) => unit.id === input.baseUnitId);
     const packUnit = units.find((unit) => unit.id === input.packUnitId);
-    if (!baseUnit || !isIndividualUnit(baseUnit)) throw new HttpError(400, "INVALID_BASE_UNIT", "The individual item must be Tin, Balti, or Bottle.");
+    if (!baseUnit || !isIndividualUnit(baseUnit)) throw new HttpError(400, "INVALID_BASE_UNIT", "The individual item must be Tin, Balti, Bottle, or Pouch.");
     if (individualOnly && input.packUnitId !== input.baseUnitId) throw new HttpError(400, "INVALID_INDIVIDUAL_PACKING", "An individual-only product must use one item per unit.");
     if (!individualOnly && (!packUnit || !isOuterPackUnit(packUnit))) throw new HttpError(400, "INVALID_PACK_UNIT", "The outer packing must be Tray, Box, Carton, or Pack.");
     if (input.categoryId && !category) throw new HttpError(400, "INVALID_CATEGORY", "Selected category is unavailable.");
     if (input.brandId && !brand) throw new HttpError(400, "INVALID_BRAND", "Selected brand is unavailable.");
+  }
+
+  private validatePrices(input: UpdateProductInput) {
+    const purchase = moneyToMinor(input.purchasePrice);
+    const retail = moneyToMinor(input.retailPrice);
+    const wholesale = moneyToMinor(input.wholesalePrice);
+    const minimum = moneyToMinor(input.minimumPrice);
+    if (purchase < 0 || retail < 0 || wholesale < 0 || minimum < 0) throw new HttpError(400, "INVALID_PRICE", "Prices cannot be negative.");
+    if (retail === 0 && wholesale === 0) throw new HttpError(400, "INVALID_SALE_PRICE", "Enter at least one sale price.");
+    if (minimum > retail) throw new HttpError(400, "INVALID_MINIMUM_PRICE", "Minimum price cannot exceed retail price.");
   }
 
   private async validateIdentifiers(sku: string, barcode: string, excludeId?: string) {
@@ -233,17 +328,28 @@ export class ProductService {
 
   private async createOpeningStock(tx: Transaction, product: ProductRecord, quantity: number, actorId: string) {
     const valueMinor = quantity * product.purchasePriceMinor;
-    const batch = await tx.productBatch.create({ data: { productId: product.id, batchNumber: "OPENING", purchasePriceMinor: product.purchasePriceMinor, stockOnHandBaseQty: quantity } });
-    await tx.stockMovement.create({ data: {
-      productId: product.id, batchId: batch.id, movementType: "OPENING_STOCK", quantityBase: quantity,
-      balanceAfterBase: quantity, batchBalanceAfterBase: quantity, unitCostMinor: product.purchasePriceMinor, valueMinor, sourceType: "PRODUCT", sourceId: product.id,
-      sourceLineId: "OPENING_STOCK", notes: "Opening stock recorded during product creation", createdById: actorId,
-    } });
+    const batch = await tx.productBatch.create({ data: { productId: product.id, batchNumber: "OPENING", purchasePriceMinor: product.purchasePriceMinor, stockOnHandBaseQty: 0 } });
+    await applyStockMovement(tx, { productId: product.id, batchId: batch.id, movementType: "OPENING_STOCK", quantityBase: quantity, unitCostMinor: product.purchasePriceMinor, sourceType: "PRODUCT", sourceId: product.id, sourceLineId: "OPENING_STOCK", notes: "Opening stock recorded during product creation", createdById: actorId });
     if (valueMinor) await AccountingPostingService.post(tx, { sourceType: "PRODUCT", sourceId: product.id, transactionDate: new Date(), description: `Opening stock - ${product.name}`, createdById: actorId, lines: [{ systemCode: "INVENTORY", debitMinor: valueMinor, productId: product.id }, { systemCode: "OPENING_EQUITY", creditMinor: valueMinor }] });
   }
 
+  private async referenceCounts(id: string) {
+    const [sales, purchases, purchaseReturns, salesReturns, replacementReturns, batches, stockMovements, stockCounts, ledgerLines] = await Promise.all([
+      this.db.saleItem.count({ where: { productId: id } }),
+      this.db.purchaseItem.count({ where: { productId: id } }),
+      this.db.purchaseReturnItem.count({ where: { productId: id } }),
+      this.db.salesReturnItem.count({ where: { productId: id } }),
+      this.db.salesReturnReplacementItem.count({ where: { productId: id } }),
+      this.db.productBatch.count({ where: { productId: id } }),
+      this.db.stockMovement.count({ where: { productId: id } }),
+      this.db.stockCountItem.count({ where: { productId: id } }),
+      this.db.journalLine.count({ where: { productId: id } }),
+    ]);
+    return { sales, purchases, purchaseReturns, salesReturns, replacementReturns, batches, stockMovements, stockCounts, ledgerLines };
+  }
+
   private handleUniqueError(error: unknown): never {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") throw new HttpError(409, "DUPLICATE_IDENTIFIER", "SKU or barcode is already in use.");
+    if (isUniqueConstraintError(error)) throw new HttpError(409, "DUPLICATE_IDENTIFIER", "SKU or barcode is already in use.");
     throw error;
   }
 }

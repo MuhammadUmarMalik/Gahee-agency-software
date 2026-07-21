@@ -9,46 +9,106 @@
   "main": "dist-electron/main.js",
   "build": {
     "appId": "com.umarmalik.oil-agency-pos",
+    "productName": "Oil Agency POS",
+    "npmRebuild": true,
+    "nodeGypRebuild": false,
+    "buildDependenciesFromSource": false,
+    "directories": {
+      "output": "release",
+      "buildResources": "public"
+    },
+    "artifactName": "${productName} Setup ${version}.${ext}",
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json",
+      "node_modules/better-sqlite3/**/*"
+    ],
+    "asarUnpack": [
+      "node_modules/better-sqlite3/**/*",
+      "**/*.node"
+    ],
+    "extraResources": [
+      {
+        "from": "../../drizzle",
+        "to": "drizzle",
+        "filter": [
+          "**/*.sql",
+          "meta/_journal.json"
+        ]
+      }
+    ],
     "win": {
-      "icon": "public/app-icon.ico"
+      "icon": "public/app-icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "installerIcon": "public/app-icon.ico",
+      "uninstallerIcon": "public/app-icon.ico"
     }
   },
   "scripts": {
-    "predev": "npm --prefix ../.. run db:generate && npm --prefix ../.. run db:ensure",
+    "clean:electron": "node scripts/clean-electron-output.cjs",
+    "native:electron": "electron-builder install-app-deps && electron-rebuild -f -w better-sqlite3 -v 36.3.1",
+    "predev": "npm run clean:electron && npm run native:electron",
     "dev": "vite",
-    "build": "npm --prefix ../.. run db:generate && tsc -b && vite build",
-    "typecheck": "tsc -b --pretty false"
+    "prebuild": "npm run clean:electron && npm run native:electron",
+    "build": "tsc -b && vite build",
+    "package": "npm run build && electron-builder --win nsis",
+    "package:dir": "npm run build && electron-builder --win dir",
+    "dist": "npm run package",
+    "dist:dir": "npm run package:dir",
+    "lint": "tsc -b --pretty false",
+    "typecheck": "tsc -b --pretty false",
+    "test": "vitest run electron/services"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.0.1",
     "@oil-agency/api": "*",
     "@oil-agency/shared": "*",
+    "better-sqlite3": "^12.11.1",
     "@radix-ui/react-slot": "^1.2.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "dotenv": "^16.5.0",
+    "drizzle-orm": "^0.45.2",
     "lucide-react": "^0.511.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-hook-form": "^7.56.4",
     "react-router-dom": "^7.6.0",
+    "qrcode-generator": "^1.4.4",
     "tailwind-merge": "^3.3.0",
     "zod": "^3.25.28",
     "write-excel-file": "^2.3.10",
     "zustand": "^5.0.5"
   },
   "devDependencies": {
+    "@electron/rebuild": "^4.2.0",
     "@types/node": "^22.15.21",
     "@types/react": "^19.1.4",
     "@types/react-dom": "^19.1.5",
     "@vitejs/plugin-react": "^4.4.1",
     "autoprefixer": "^10.4.21",
-    "electron": "^36.3.1",
+    "electron": "36.3.1",
+    "electron-builder": "^26.0.12",
     "postcss": "^8.5.3",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.8.3",
     "vite": "^6.3.5",
     "vite-plugin-electron": "^0.29.0",
-    "vite-plugin-electron-renderer": "^0.14.6"
+    "vite-plugin-electron-renderer": "^0.14.6",
+    "vitest": "^3.1.4"
   }
 }

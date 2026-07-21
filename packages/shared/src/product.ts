@@ -78,6 +78,12 @@ export const productFieldsSchema = z
     wholesalePrice: moneySchema,
     minimumPrice: moneySchema,
     taxRatePercent: percentageSchema,
+    fbrHsCode: z.string().trim().max(20).regex(/^$|^\d{4}\.\d{4}$/, "HS code must look like 1511.9090.").default(""),
+    fbrUom: z.string().trim().min(1).max(100).default("Numbers, pieces, units"),
+    fbrSaleType: z.string().trim().min(1).max(160).default("Goods at standard rate (default)"),
+    fbrFixedNotifiedValue: moneySchema.default("0.00"),
+    fbrSroScheduleNo: z.string().trim().max(80).default(""),
+    fbrSroItemSerialNo: z.string().trim().max(80).default(""),
     reorderLevelBaseQty: z.number().int().min(0).max(100_000_000),
     rackLocation: z.string().trim().max(80),
     notes: z.string().trim().max(500),
@@ -172,6 +178,12 @@ export interface ProductDto {
   wholesalePrice: string;
   minimumPrice: string;
   taxRatePercent: string;
+  fbrHsCode: string;
+  fbrUom: string;
+  fbrSaleType: string;
+  fbrFixedNotifiedValue: string;
+  fbrSroScheduleNo: string;
+  fbrSroItemSerialNo: string;
   reorderLevelBaseQty: number;
   stockOnHandBaseQty: number;
   rackLocation: string;

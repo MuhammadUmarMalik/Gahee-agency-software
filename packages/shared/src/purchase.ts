@@ -7,7 +7,7 @@ const optionalDate = z.string().date().nullable().optional();
 export const purchaseItemInputSchema = z.object({
   productId: z.string().min(1),
   batchId: z.string().min(1).nullable().optional(),
-  batchNumber: z.string().trim().min(1).max(80),
+  batchNumber: z.string().trim().max(80).default(""),
   manufacturingDate: optionalDate,
   expiryDate: optionalDate,
   cartonQuantity: z.number().int().min(0).max(10_000_000),

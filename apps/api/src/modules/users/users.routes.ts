@@ -1,10 +1,10 @@
-import argon2 from "argon2";
-import { Prisma } from "@prisma/client";
-import type { PrismaClient } from "@prisma/client";
+import type { AppDbClient, TransactionClient, PaymentMethod, SourceType, StockMovementType, BackupKind, JobType, JobStatus, CashDirection, CashbookEntryType, ReturnCondition } from "../../lib/db.js";
 import { Router } from "express";
 import { createUserInputSchema, PERMISSIONS, resetPasswordInputSchema, updateUserInputSchema } from "@oil-agency/shared";
 import { z } from "zod";
+import { isUniqueConstraintError } from "../../lib/db-errors.js";
 import { HttpError } from "../../lib/http-error.js";
+import { hashSecret } from "../../lib/password.js";
 import { authenticate } from "../../middleware/authenticate.js";
 import { requirePermission } from "../../middleware/require-permission.js";
 
@@ -14,9 +14,9 @@ const userSelect = {
   id: true, username: true, displayName: true, isActive: true,
   cashierDiscountLimitBps: true, lastLoginAt: true, createdAt: true,
   role: { select: { code: true, name: true } },
-} satisfies Prisma.UserSelect;
+} satisfies Record<string, unknown>;
 
-export function createUsersRouter(db: PrismaClient): Router {
+export function createUsersRouter(db: AppDbClient): Router {
   const router = Router();
   router.use(authenticate(db), requirePermission(PERMISSIONS.USERS_MANAGE));
 
@@ -30,7 +30,7 @@ export function createUsersRouter(db: PrismaClient): Router {
     const role = await db.role.findUnique({ where: { code: input.roleCode } });
     if (!role) throw new HttpError(400, "INVALID_ROLE", "Selected role does not exist.");
     try {
-      const passwordHash = await argon2.hash(input.password);
+      const passwordHash = await hashSecret(input.password);
       const user = await db.$transaction(async (tx) => {
         const created = await tx.user.create({ data: {
           username: input.username, displayName: input.displayName,
@@ -42,7 +42,7 @@ export function createUsersRouter(db: PrismaClient): Router {
       });
       res.status(201).json({ user });
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") throw new HttpError(409, "USERNAME_EXISTS", "That username is already in use.");
+      if (isUniqueConstraintError(error)) throw new HttpError(409, "USERNAME_EXISTS", "That username is already in use.");
       throw error;
     }
   });
@@ -82,7 +82,7 @@ export function createUsersRouter(db: PrismaClient): Router {
   router.put("/:id/password", async (req, res) => {
     const userId = userIdSchema.parse(req.params.id);
     const { password } = resetPasswordInputSchema.parse(req.body);
-    const passwordHash = await argon2.hash(password);
+    const passwordHash = await hashSecret(password);
     await db.$transaction(async (tx) => {
       const result = await tx.user.updateMany({ where: { id: userId, deletedAt: null }, data: { passwordHash, failedLoginAttempts: 0, lockedUntil: null } });
       if (!result.count) throw new HttpError(404, "USER_NOT_FOUND", "User was not found.");

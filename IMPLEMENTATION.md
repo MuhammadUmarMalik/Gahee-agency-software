@@ -108,7 +108,7 @@ The MVP is successful when the user can:
 - Node.js
 - Express
 - SQLite
-- Prisma ORM
+- Drizzle ORM
 
 ### Utilities
 
@@ -144,9 +144,10 @@ oil-ghee-agency/
 │   ├── shared/
 │   ├── ui/
 │   └── config/
-├── prisma/
-│   ├── schema.prisma
-│   └── seed.ts
+├── drizzle/
+│   └── migrations
+├── apps/api/src/db/
+│   └── schema.ts
 ├── docs/
 │   ├── IMPLEMENTATION.md
 │   └── AI_PROMPTS.md

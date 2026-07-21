@@ -1,7 +1,6 @@
-import type { Prisma, SourceType, StockMovementType } from "@prisma/client";
+import type { SourceType, StockMovementType, TransactionClient } from "../../lib/db.js";
 import { HttpError } from "../../lib/http-error.js";
 
-export type TransactionClient = Prisma.TransactionClient;
 const POSITIVE = new Set<StockMovementType>(["OPENING_STOCK", "PURCHASE", "SALES_RETURN", "ADJUSTMENT_IN"]);
 const NEGATIVE = new Set<StockMovementType>(["SALE", "PURCHASE_RETURN", "DAMAGE", "EXPIRY", "ADJUSTMENT_OUT", "REPLACEMENT_OUT"]);
 

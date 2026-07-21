@@ -63,6 +63,20 @@ export const passwordSchema = z.string()
 
 export const ownerPinSchema = z.string().regex(/^\d{4,12}$/, "Owner PIN must contain 4 to 12 digits.");
 
+export const setupOwnerInputSchema = z.object({
+  username: z.string().trim().min(3).max(50).regex(/^[a-zA-Z0-9._-]+$/, "Use only letters, numbers, dots, underscores, or hyphens.").transform((value) => value.toLowerCase()),
+  displayName: z.string().trim().min(2).max(80),
+  password: passwordSchema,
+  confirmPassword: z.string(),
+  ownerPin: ownerPinSchema,
+  confirmOwnerPin: z.string(),
+}).superRefine((input, context) => {
+  if (input.password !== input.confirmPassword) context.addIssue({ code: z.ZodIssueCode.custom, path: ["confirmPassword"], message: "Passwords do not match." });
+  if (input.ownerPin !== input.confirmOwnerPin) context.addIssue({ code: z.ZodIssueCode.custom, path: ["confirmOwnerPin"], message: "Owner PINs do not match." });
+});
+
+export type SetupOwnerInput = z.infer<typeof setupOwnerInputSchema>;
+
 export const createUserInputSchema = z.object({
   username: z.string().trim().min(3).max(50).regex(/^[a-zA-Z0-9._-]+$/).transform((value) => value.toLowerCase()),
   displayName: z.string().trim().min(2).max(80),

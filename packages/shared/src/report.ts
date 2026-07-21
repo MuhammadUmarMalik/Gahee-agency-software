@@ -20,7 +20,7 @@ export const auditReportFilterSchema = z.object({
   from: date,
   to: date,
   userId: optionalId,
-  action: z.enum(["CREATE", "UPDATE", "SOFT_DELETE", "ACTIVATE", "DEACTIVATE", "RESET_PASSWORD", "POST", "VOID", "BACKUP", "RESTORE", "REVERSE", "CLOSE", "REOPEN"]).optional(),
+  action: z.enum(["INITIAL_SETUP", "CREATE", "UPDATE", "SOFT_DELETE", "ACTIVATE", "DEACTIVATE", "RESET_PASSWORD", "POST", "VOID", "BACKUP", "RESTORE", "REVERSE", "CLOSE", "REOPEN"]).optional(),
   entityType: z.string().trim().max(80).optional(),
 }).refine((value) => value.from <= value.to, { path: ["to"], message: "End date cannot be before start date." });
 export type ReportDateFilter = z.infer<typeof reportDateFilterSchema>;

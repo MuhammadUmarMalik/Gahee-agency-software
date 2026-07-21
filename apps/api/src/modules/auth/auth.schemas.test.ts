@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createUserInputSchema, loginInputSchema, resetPasswordInputSchema } from "@oil-agency/shared";
+import { createUserInputSchema, loginInputSchema, resetPasswordInputSchema, setupOwnerInputSchema } from "@oil-agency/shared";
 
 describe("authentication input schemas", () => {
   it("normalizes usernames", () => {
@@ -13,5 +13,12 @@ describe("authentication input schemas", () => {
 
   it("accepts a strong password reset", () => {
     expect(resetPasswordInputSchema.safeParse({ password: "NewPassword123" }).success).toBe(true);
+  });
+
+  it("requires matching first-run password and PIN confirmation", () => {
+    const base = { username: "owner", displayName: "Business Owner", password: "StrongOwner123", confirmPassword: "StrongOwner123", ownerPin: "4827", confirmOwnerPin: "4827" };
+    expect(setupOwnerInputSchema.safeParse(base).success).toBe(true);
+    expect(setupOwnerInputSchema.safeParse({ ...base, confirmPassword: "Different123" }).success).toBe(false);
+    expect(setupOwnerInputSchema.safeParse({ ...base, confirmOwnerPin: "1111" }).success).toBe(false);
   });
 });

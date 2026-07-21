@@ -49,6 +49,14 @@ export class ProductController {
       ),
     });
   };
+  restore = async (req: Request, res: Response) => {
+    res.json({
+      product: await this.service.restore(
+        productIdSchema.parse(req.params.id),
+        req.auth!.id,
+      ),
+    });
+  };
   remove = async (req: Request, res: Response) => {
     await this.service.remove(
       productIdSchema.parse(req.params.id),

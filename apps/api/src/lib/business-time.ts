@@ -22,8 +22,7 @@ function adjacentDate(date: string, days: number): string {
 
 export function automaticClosingDate(instant = new Date()): string {
   const today = pakistanDate(instant);
-  const cutoff = new Date(`${today}T${String(AUTOMATIC_CLOSING_HOUR).padStart(2, "0")}:00:00+05:00`);
-  return instant >= cutoff ? today : adjacentDate(today, -1);
+  return adjacentDate(today, -1);
 }
 
 export function nextAutomaticClosingAt(instant = new Date()): Date {

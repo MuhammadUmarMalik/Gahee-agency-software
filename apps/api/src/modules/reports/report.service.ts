@@ -1,83 +1,1621 @@
-import type { Prisma, PrismaClient } from "@prisma/client";
-import type { AuditReportFilter, InventoryReportFilter, LedgerReportFilter, ReportDateFilter } from "@oil-agency/shared";
+import type { AppDbClient } from "../../lib/db.js";
+import { coerceSqliteDate } from "../../lib/db.js";
+import type {
+  AuditReportFilter,
+  InventoryReportFilter,
+  LedgerReportFilter,
+  ReportDateFilter,
+} from "@oil-agency/shared";
 import { minorToMoney } from "../products/product.service.js";
-import { pakistanDay } from "../cashbook/cashbook.service.js";
+import { pakistanDay } from "../../lib/business-time.js";
 
-const dayKey = (date: Date) => { const parts = Object.fromEntries(new Intl.DateTimeFormat("en", { timeZone: "Asia/Karachi", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(date).map((part) => [part.type, part.value])); return `${parts.year}-${parts.month}-${parts.day}`; };
-const range = (from: string, to: string) => ({ gte: pakistanDay(from).start, lte: pakistanDay(to).end });
-const add = <T>(map: Map<string, T>, key: string, initial: () => T) => { let row = map.get(key); if (!row) { row = initial(); map.set(key, row); } return row; };
-export function classifySaleSettlement(paymentStatus: "PAID" | "PARTIAL" | "UNPAID", totalMinor: number, cashPaidMinor: number) { return paymentStatus === "UNPAID" ? "CREDIT" : paymentStatus === "PARTIAL" ? "PARTIAL" : cashPaidMinor >= totalMinor ? "CASH" : "PAID_NON_CASH"; }
+const asDate = (value: unknown) => coerceSqliteDate(value);
+const dayKey = (value: unknown) => {
+  const date = asDate(value);
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en", {
+      timeZone: "Asia/Karachi",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    })
+      .formatToParts(date)
+      .map((part) => [part.type, part.value]),
+  );
+  return `${parts.year}-${parts.month}-${parts.day}`;
+};
+const iso = (value: unknown) => asDate(value).toISOString();
+const dateOnly = (value: unknown) => asDate(value).toISOString().slice(0, 10);
+const range = (from: string, to: string) => ({
+  gte: pakistanDay(from).start,
+  lte: pakistanDay(to).end,
+});
+const add = <T>(map: Map<string, T>, key: string, initial: () => T) => {
+  let row = map.get(key);
+  if (!row) {
+    row = initial();
+    map.set(key, row);
+  }
+  return row;
+};
+const productItemWhere = (filter: {
+  productId?: string | undefined;
+  categoryId?: string | undefined;
+  brandId?: string | undefined;
+}) => ({
+  ...(filter.productId ? { productId: filter.productId } : {}),
+  ...(filter.categoryId || filter.brandId
+    ? {
+        product: {
+          ...(filter.categoryId ? { categoryId: filter.categoryId } : {}),
+          ...(filter.brandId ? { brandId: filter.brandId } : {}),
+        },
+      }
+    : {}),
+});
+const hasProductFilter = (filter: {
+  productId?: string | undefined;
+  categoryId?: string | undefined;
+  brandId?: string | undefined;
+}) => Boolean(filter.productId || filter.categoryId || filter.brandId);
+export function classifySaleSettlement(
+  paymentStatus: "PAID" | "PARTIAL" | "UNPAID",
+  totalMinor: number,
+  cashPaidMinor: number,
+) {
+  return paymentStatus === "UNPAID"
+    ? "CREDIT"
+    : paymentStatus === "PARTIAL"
+      ? "PARTIAL"
+      : cashPaidMinor >= totalMinor
+        ? "CASH"
+        : "PAID_NON_CASH";
+}
+function salePaymentStatus(value: string): "PAID" | "PARTIAL" | "UNPAID" {
+  return value === "PAID" || value === "PARTIAL" ? value : "UNPAID";
+}
 
 export class ReportService {
-  constructor(private readonly db: PrismaClient) {}
-  async options() { const [customers, suppliers, products, categories, brands, users] = await Promise.all([this.db.customer.findMany({ where: { deletedAt: null }, select: { id: true, code: true, name: true, businessName: true, phone: true, whatsapp: true, address: true, taxIdentifier: true }, orderBy: { name: "asc" } }), this.db.supplier.findMany({ where: { deletedAt: null }, select: { id: true, code: true, name: true, businessName: true, phone: true, whatsapp: true, address: true, taxIdentifier: true }, orderBy: { name: "asc" } }), this.db.product.findMany({ where: { deletedAt: null }, select: { id: true, name: true, sku: true, categoryId: true, brandId: true }, orderBy: { name: "asc" } }), this.db.category.findMany({ where: { deletedAt: null }, select: { id: true, name: true }, orderBy: { name: "asc" } }), this.db.brand.findMany({ where: { deletedAt: null }, select: { id: true, name: true }, orderBy: { name: "asc" } }), this.db.user.findMany({ where: { deletedAt: null }, select: { id: true, displayName: true, username: true, isActive: true }, orderBy: { displayName: "asc" } })]); return { customers, suppliers, products, categories, brands, users: users.map((user) => ({ ...user, name: user.displayName })) }; }
+  constructor(private readonly db: AppDbClient) {}
+  async options() {
+    const [customers, suppliers, products, categories, brands, users] =
+      await Promise.all([
+        this.db.customer.findMany({
+          where: { deletedAt: null },
+          select: {
+            id: true,
+            code: true,
+            name: true,
+            businessName: true,
+            phone: true,
+            whatsapp: true,
+            address: true,
+            taxIdentifier: true,
+          },
+          orderBy: { name: "asc" },
+        }),
+        this.db.supplier.findMany({
+          where: { deletedAt: null },
+          select: {
+            id: true,
+            code: true,
+            name: true,
+            businessName: true,
+            phone: true,
+            whatsapp: true,
+            address: true,
+            taxIdentifier: true,
+          },
+          orderBy: { name: "asc" },
+        }),
+        this.db.product.findMany({
+          where: { deletedAt: null },
+          select: {
+            id: true,
+            name: true,
+            sku: true,
+            categoryId: true,
+            brandId: true,
+          },
+          orderBy: { name: "asc" },
+        }),
+        this.db.category.findMany({
+          where: { deletedAt: null },
+          select: { id: true, name: true },
+          orderBy: { name: "asc" },
+        }),
+        this.db.brand.findMany({
+          where: { deletedAt: null },
+          select: { id: true, name: true },
+          orderBy: { name: "asc" },
+        }),
+        this.db.user.findMany({
+          where: { deletedAt: null },
+          select: {
+            id: true,
+            displayName: true,
+            username: true,
+            isActive: true,
+          },
+          orderBy: { displayName: "asc" },
+        }),
+      ]);
+    return {
+      customers,
+      suppliers,
+      products,
+      categories,
+      brands,
+      users: users.map((user) => ({ ...user, name: user.displayName })),
+    };
+  }
 
   async sales(filter: ReportDateFilter) {
-    const itemWhere: Prisma.SaleItemWhereInput = { ...(filter.productId ? { productId: filter.productId } : {}), ...(filter.categoryId ? { product: { categoryId: filter.categoryId } } : {}) };
-    const sales = await this.db.sale.findMany({ where: { status: "POSTED", soldAt: range(filter.from, filter.to), ...(filter.customerId ? { customerId: filter.customerId } : {}), ...(filter.paymentStatus ? { paymentStatus: filter.paymentStatus } : {}), ...(filter.paymentMethod ? { payments: { some: { method: filter.paymentMethod } } } : {}), ...((filter.productId || filter.categoryId) ? { items: { some: itemWhere } } : {}) }, select: { id: true, invoiceNumber: true, soldAt: true, paymentStatus: true, totalMinor: true, paidMinor: true, customer: { select: { id: true, name: true, businessName: true } }, payments: { select: { method: true, amountMinor: true } }, items: { where: itemWhere, select: { productId: true, quantityBase: true, lineTotalMinor: true, product: { select: { name: true, sku: true, category: { select: { name: true } } } } } } }, orderBy: { soldAt: "asc" } });
-    const daily = new Map<string, { date: string; invoiceCount: number; quantityBase: number; salesMinor: number }>(); const products = new Map<string, { productId: string; name: string; sku: string; category: string | null; invoiceCount: Set<string>; quantityBase: number; salesMinor: number }>(); const customers = new Map<string, { customerId: string | null; name: string; invoiceCount: number; salesMinor: number }>(); const settlements = new Map<string, { type: string; invoiceCount: number; salesMinor: number }>();
-    const invoices = sales.map((sale) => { const salesMinor = sale.items.reduce((sum, item) => sum + item.lineTotalMinor, 0); const quantityBase = sale.items.reduce((sum, item) => sum + item.quantityBase, 0); const date = dayKey(sale.soldAt); const d = add(daily, date, () => ({ date, invoiceCount: 0, quantityBase: 0, salesMinor: 0 })); d.invoiceCount++; d.quantityBase += quantityBase; d.salesMinor += salesMinor; const customerKey = sale.customer?.id ?? "WALK_IN"; const c = add(customers, customerKey, () => ({ customerId: sale.customer?.id ?? null, name: sale.customer?.businessName ?? sale.customer?.name ?? "Walk-in customer", invoiceCount: 0, salesMinor: 0 })); c.invoiceCount++; c.salesMinor += salesMinor; const cashPaid = sale.payments.filter((payment) => payment.method === "CASH").reduce((sum, payment) => sum + payment.amountMinor, 0); const settlement = classifySaleSettlement(sale.paymentStatus, sale.totalMinor, cashPaid); const s = add(settlements, settlement, () => ({ type: settlement, invoiceCount: 0, salesMinor: 0 })); s.invoiceCount++; s.salesMinor += salesMinor; for (const item of sale.items) { const p = add(products, item.productId, () => ({ productId: item.productId, name: item.product.name, sku: item.product.sku, category: item.product.category?.name ?? null, invoiceCount: new Set(), quantityBase: 0, salesMinor: 0 })); p.invoiceCount.add(sale.id); p.quantityBase += item.quantityBase; p.salesMinor += item.lineTotalMinor; } return { id: sale.id, invoiceNumber: sale.invoiceNumber, date, customer: c.name, settlement, paymentMethods: [...new Set(sale.payments.map((payment) => payment.method))].join(", ") || "CREDIT", quantityBase, sales: minorToMoney(salesMinor), paid: minorToMoney(Math.min(sale.paidMinor, salesMinor)) }; });
-    const totalMinor = sales.reduce((sum, sale) => sum + sale.items.reduce((lineSum, item) => lineSum + item.lineTotalMinor, 0), 0); return { summary: { invoices: sales.length, quantityBase: invoices.reduce((sum, row) => sum + row.quantityBase, 0), sales: minorToMoney(totalMinor) }, invoices, daily: [...daily.values()].map(moneyRow), products: [...products.values()].map((row) => ({ ...row, invoiceCount: row.invoiceCount.size, sales: minorToMoney(row.salesMinor) })).sort((a, b) => b.salesMinor - a.salesMinor), customers: [...customers.values()].map(moneyRow).sort((a, b) => b.salesMinor - a.salesMinor), settlements: [...settlements.values()].map(moneyRow) };
+    const itemWhere = productItemWhere(filter);
+    const sales = await this.db.sale.findMany({
+      where: {
+        status: "POSTED",
+        soldAt: range(filter.from, filter.to),
+        ...(filter.customerId ? { customerId: filter.customerId } : {}),
+        ...(filter.userId ? { createdById: filter.userId } : {}),
+        ...(filter.paymentStatus
+          ? { paymentStatus: filter.paymentStatus }
+          : {}),
+        ...(filter.paymentMethod
+          ? {
+              payments: {
+                some: { method: filter.paymentMethod, status: "POSTED" },
+              },
+            }
+          : {}),
+        ...(hasProductFilter(filter) ? { items: { some: itemWhere } } : {}),
+      },
+      select: {
+        id: true,
+        invoiceNumber: true,
+        soldAt: true,
+        paymentStatus: true,
+        totalMinor: true,
+        paidMinor: true,
+        customer: { select: { id: true, name: true, businessName: true } },
+        payments: {
+          where: { status: "POSTED" },
+          select: { method: true, amountMinor: true },
+        },
+        items: {
+          where: itemWhere,
+          select: {
+            productId: true,
+            quantityBase: true,
+            lineTotalMinor: true,
+            product: {
+              select: {
+                name: true,
+                sku: true,
+                category: { select: { name: true } },
+              },
+            },
+          },
+        },
+      },
+      orderBy: { soldAt: "asc" },
+    });
+    const daily = new Map<
+      string,
+      {
+        date: string;
+        invoiceCount: number;
+        quantityBase: number;
+        salesMinor: number;
+      }
+    >();
+    const products = new Map<
+      string,
+      {
+        productId: string;
+        name: string;
+        sku: string;
+        category: string | null;
+        invoiceCount: Set<string>;
+        quantityBase: number;
+        salesMinor: number;
+      }
+    >();
+    const customers = new Map<
+      string,
+      {
+        customerId: string | null;
+        name: string;
+        invoiceCount: number;
+        salesMinor: number;
+      }
+    >();
+    const settlements = new Map<
+      string,
+      { type: string; invoiceCount: number; salesMinor: number }
+    >();
+    const invoices = sales.map((sale) => {
+      const salesMinor = sale.items.reduce(
+        (sum, item) => sum + item.lineTotalMinor,
+        0,
+      );
+      const quantityBase = sale.items.reduce(
+        (sum, item) => sum + item.quantityBase,
+        0,
+      );
+      const date = dayKey(sale.soldAt);
+      const d = add(daily, date, () => ({
+        date,
+        invoiceCount: 0,
+        quantityBase: 0,
+        salesMinor: 0,
+      }));
+      d.invoiceCount++;
+      d.quantityBase += quantityBase;
+      d.salesMinor += salesMinor;
+      const customerKey = sale.customer?.id ?? "WALK_IN";
+      const c = add(customers, customerKey, () => ({
+        customerId: sale.customer?.id ?? null,
+        name:
+          sale.customer?.businessName ??
+          sale.customer?.name ??
+          "Walk-in customer",
+        invoiceCount: 0,
+        salesMinor: 0,
+      }));
+      c.invoiceCount++;
+      c.salesMinor += salesMinor;
+      const cashPaid = sale.payments
+        .filter((payment) => payment.method === "CASH")
+        .reduce((sum, payment) => sum + payment.amountMinor, 0);
+      const settlement = classifySaleSettlement(
+        salePaymentStatus(sale.paymentStatus),
+        sale.totalMinor,
+        cashPaid,
+      );
+      const s = add(settlements, settlement, () => ({
+        type: settlement,
+        invoiceCount: 0,
+        salesMinor: 0,
+      }));
+      s.invoiceCount++;
+      s.salesMinor += salesMinor;
+      for (const item of sale.items) {
+        const p = add(products, item.productId, () => ({
+          productId: item.productId,
+          name: item.product.name,
+          sku: item.product.sku,
+          category: item.product.category?.name ?? null,
+          invoiceCount: new Set<string>(),
+          quantityBase: 0,
+          salesMinor: 0,
+        }));
+        p.invoiceCount.add(sale.id);
+        p.quantityBase += item.quantityBase;
+        p.salesMinor += item.lineTotalMinor;
+      }
+      return {
+        id: sale.id,
+        invoiceNumber: sale.invoiceNumber,
+        date,
+        customer: c.name,
+        settlement,
+        paymentMethods:
+          [...new Set(sale.payments.map((payment) => payment.method))].join(
+            ", ",
+          ) || "CREDIT",
+        quantityBase,
+        sales: minorToMoney(salesMinor),
+        paid: minorToMoney(Math.min(sale.paidMinor, salesMinor)),
+      };
+    });
+    const totalMinor = sales.reduce(
+      (sum, sale) =>
+        sum +
+        sale.items.reduce((lineSum, item) => lineSum + item.lineTotalMinor, 0),
+      0,
+    );
+    return {
+      summary: {
+        invoices: sales.length,
+        quantityBase: invoices.reduce((sum, row) => sum + row.quantityBase, 0),
+        sales: minorToMoney(totalMinor),
+      },
+      invoices,
+      daily: [...daily.values()].map(moneyRow),
+      products: [...products.values()]
+        .map((row) => ({
+          ...row,
+          invoiceCount: row.invoiceCount.size,
+          sales: minorToMoney(row.salesMinor),
+        }))
+        .sort((a, b) => b.salesMinor - a.salesMinor),
+      customers: [...customers.values()]
+        .map(moneyRow)
+        .sort((a, b) => b.salesMinor - a.salesMinor),
+      settlements: [...settlements.values()].map(moneyRow),
+    };
   }
 
   async purchases(filter: ReportDateFilter) {
-    const itemWhere: Prisma.PurchaseItemWhereInput = { ...(filter.productId ? { productId: filter.productId } : {}), ...(filter.categoryId ? { product: { categoryId: filter.categoryId } } : {}) }; const purchases = await this.db.purchase.findMany({ where: { status: "POSTED", purchasedAt: range(filter.from, filter.to), ...(filter.supplierId ? { supplierId: filter.supplierId } : {}), ...(filter.paymentStatus ? { paymentStatus: filter.paymentStatus } : {}), ...(filter.paymentMethod ? { payments: { some: { method: filter.paymentMethod } } } : {}), ...((filter.productId || filter.categoryId) ? { items: { some: itemWhere } } : {}) }, select: { id: true, invoiceNumber: true, supplierInvoice: true, purchasedAt: true, paymentStatus: true, totalMinor: true, paidMinor: true, supplier: { select: { id: true, name: true, businessName: true } }, payments: { select: { method: true } }, items: { where: itemWhere, select: { quantityBase: true, lineTotalMinor: true } } }, orderBy: { purchasedAt: "asc" } }); const daily = new Map<string, { date: string; invoiceCount: number; purchasesMinor: number }>(); const suppliers = new Map<string, { supplierId: string; name: string; invoiceCount: number; purchasesMinor: number }>(); const rows = purchases.map((purchase) => { const amountMinor = filter.productId || filter.categoryId ? purchase.items.reduce((sum, item) => sum + item.lineTotalMinor, 0) : purchase.totalMinor; const date = dayKey(purchase.purchasedAt); const d = add(daily, date, () => ({ date, invoiceCount: 0, purchasesMinor: 0 })); d.invoiceCount++; d.purchasesMinor += amountMinor; const s = add(suppliers, purchase.supplier.id, () => ({ supplierId: purchase.supplier.id, name: purchase.supplier.businessName ?? purchase.supplier.name, invoiceCount: 0, purchasesMinor: 0 })); s.invoiceCount++; s.purchasesMinor += amountMinor; return { id: purchase.id, invoiceNumber: purchase.invoiceNumber, supplierInvoice: purchase.supplierInvoice, date, supplier: s.name, paymentStatus: purchase.paymentStatus, paymentMethods: [...new Set(purchase.payments.map((payment) => payment.method))].join(", ") || "CREDIT", purchases: minorToMoney(amountMinor), paid: minorToMoney(Math.min(purchase.paidMinor, amountMinor)) }; }); const total = purchases.reduce((sum, purchase) => sum + (filter.productId || filter.categoryId ? purchase.items.reduce((value, item) => value + item.lineTotalMinor, 0) : purchase.totalMinor), 0); return { summary: { invoices: rows.length, purchases: minorToMoney(total) }, rows, daily: [...daily.values()].map((row) => ({ ...row, purchases: minorToMoney(row.purchasesMinor) })), suppliers: [...suppliers.values()].map((row) => ({ ...row, purchases: minorToMoney(row.purchasesMinor) })).sort((a, b) => b.purchasesMinor - a.purchasesMinor) };
+    const itemWhere = productItemWhere(filter);
+    const scoped = hasProductFilter(filter);
+    const purchases = await this.db.purchase.findMany({
+      where: {
+        status: "POSTED",
+        purchasedAt: range(filter.from, filter.to),
+        ...(filter.supplierId ? { supplierId: filter.supplierId } : {}),
+        ...(filter.userId ? { createdById: filter.userId } : {}),
+        ...(filter.paymentStatus
+          ? { paymentStatus: filter.paymentStatus }
+          : {}),
+        ...(filter.paymentMethod
+          ? {
+              payments: {
+                some: { method: filter.paymentMethod, status: "POSTED" },
+              },
+            }
+          : {}),
+        ...(scoped ? { items: { some: itemWhere } } : {}),
+      },
+      select: {
+        id: true,
+        invoiceNumber: true,
+        supplierInvoice: true,
+        purchasedAt: true,
+        paymentStatus: true,
+        totalMinor: true,
+        paidMinor: true,
+        supplier: { select: { id: true, name: true, businessName: true } },
+        payments: { where: { status: "POSTED" }, select: { method: true } },
+        items: {
+          where: itemWhere,
+          select: { quantityBase: true, lineTotalMinor: true },
+        },
+      },
+      orderBy: { purchasedAt: "asc" },
+    });
+    const daily = new Map<
+      string,
+      { date: string; invoiceCount: number; purchasesMinor: number }
+    >();
+    const suppliers = new Map<
+      string,
+      {
+        supplierId: string;
+        name: string;
+        invoiceCount: number;
+        purchasesMinor: number;
+      }
+    >();
+    const rows = purchases.map((purchase) => {
+      const amountMinor = scoped
+        ? purchase.items.reduce((sum, item) => sum + item.lineTotalMinor, 0)
+        : purchase.totalMinor;
+      const date = dayKey(purchase.purchasedAt);
+      const d = add(daily, date, () => ({
+        date,
+        invoiceCount: 0,
+        purchasesMinor: 0,
+      }));
+      d.invoiceCount++;
+      d.purchasesMinor += amountMinor;
+      const s = add(suppliers, purchase.supplier.id, () => ({
+        supplierId: purchase.supplier.id,
+        name: purchase.supplier.businessName ?? purchase.supplier.name,
+        invoiceCount: 0,
+        purchasesMinor: 0,
+      }));
+      s.invoiceCount++;
+      s.purchasesMinor += amountMinor;
+      return {
+        id: purchase.id,
+        invoiceNumber: purchase.invoiceNumber,
+        supplierInvoice: purchase.supplierInvoice,
+        date,
+        supplier: s.name,
+        paymentStatus: purchase.paymentStatus,
+        paymentMethods:
+          [...new Set(purchase.payments.map((payment) => payment.method))].join(
+            ", ",
+          ) || "CREDIT",
+        purchases: minorToMoney(amountMinor),
+        paid: minorToMoney(Math.min(purchase.paidMinor, amountMinor)),
+      };
+    });
+    const total = purchases.reduce(
+      (sum, purchase) =>
+        sum +
+        (scoped
+          ? purchase.items.reduce(
+              (value, item) => value + item.lineTotalMinor,
+              0,
+            )
+          : purchase.totalMinor),
+      0,
+    );
+    return {
+      summary: { invoices: rows.length, purchases: minorToMoney(total) },
+      rows,
+      daily: [...daily.values()].map((row) => ({
+        ...row,
+        purchases: minorToMoney(row.purchasesMinor),
+      })),
+      suppliers: [...suppliers.values()]
+        .map((row) => ({ ...row, purchases: minorToMoney(row.purchasesMinor) }))
+        .sort((a, b) => b.purchasesMinor - a.purchasesMinor),
+    };
   }
 
-  async inventory(filter: InventoryReportFilter) { const where: Prisma.ProductWhereInput = { deletedAt: null, isActive: true, ...(filter.productId ? { id: filter.productId } : {}), ...(filter.categoryId ? { categoryId: filter.categoryId } : {}) }; const products = await this.db.product.findMany({ where, select: { id: true, name: true, sku: true, stockOnHandBaseQty: true, reorderLevelBaseQty: true, baseUnit: { select: { symbol: true } }, category: { select: { name: true } }, batches: { where: { stockOnHandBaseQty: { gt: 0 } }, select: { id: true, batchNumber: true, expiryDate: true, stockOnHandBaseQty: true }, orderBy: { expiryDate: "asc" } } }, orderBy: { name: "asc" } }); const today = pakistanDay(dayKey(new Date())).start; const near = new Date(today.getTime() + filter.nearExpiryDays * 86_400_000); const current = products.map((product) => { const expired = product.batches.filter((batch) => batch.expiryDate && batch.expiryDate < today).reduce((sum, batch) => sum + batch.stockOnHandBaseQty, 0); const available = product.stockOnHandBaseQty - expired; return { productId: product.id, name: product.name, sku: product.sku, category: product.category?.name ?? null, baseUnit: product.baseUnit.symbol, currentBaseQty: product.stockOnHandBaseQty, availableBaseQty: available, reorderLevelBaseQty: product.reorderLevelBaseQty, isLowStock: available <= product.reorderLevelBaseQty }; }); const batches = products.flatMap((product) => product.batches.map((batch) => ({ productId: product.id, product: product.name, sku: product.sku, batchNumber: batch.batchNumber, expiryDate: batch.expiryDate?.toISOString().slice(0, 10) ?? null, stockBaseQty: batch.stockOnHandBaseQty, baseUnit: product.baseUnit.symbol, status: batch.expiryDate && batch.expiryDate < today ? "EXPIRED" : batch.expiryDate && batch.expiryDate <= near ? "NEAR_EXPIRY" : "OK" }))); return { current, lowStock: current.filter((row) => row.isLowStock), batches, nearExpiry: batches.filter((row) => row.status === "NEAR_EXPIRY"), expiredBatches: batches.filter((row) => row.status === "EXPIRED") }; }
-
-  async writeOffs(filter: ReportDateFilter) { const rows = await this.db.damageEntry.findMany({ where: { occurredAt: range(filter.from, filter.to), ...(filter.productId ? { productId: filter.productId } : {}), ...(filter.categoryId ? { product: { categoryId: filter.categoryId } } : {}) }, select: { entryNumber: true, type: true, quantityBase: true, reason: true, occurredAt: true, product: { select: { name: true, sku: true, baseUnit: { select: { symbol: true } } } }, batch: { select: { batchNumber: true, expiryDate: true } }, createdBy: { select: { displayName: true } } }, orderBy: { occurredAt: "desc" } }); return { rows: rows.map((row) => ({ ...row, date: dayKey(row.occurredAt) })), summary: { damagedBaseQty: rows.filter((row) => row.type === "DAMAGED").reduce((sum, row) => sum + row.quantityBase, 0), expiredBaseQty: rows.filter((row) => row.type === "EXPIRED").reduce((sum, row) => sum + row.quantityBase, 0) } };
+  async inventory(filter: InventoryReportFilter) {
+    const where = {
+      deletedAt: null,
+      isActive: true,
+      ...(filter.productId ? { id: filter.productId } : {}),
+      ...(filter.categoryId ? { categoryId: filter.categoryId } : {}),
+      ...(filter.brandId ? { brandId: filter.brandId } : {}),
+    };
+    const products = await this.db.product.findMany({
+      where,
+      select: {
+        id: true,
+        name: true,
+        sku: true,
+        stockOnHandBaseQty: true,
+        reorderLevelBaseQty: true,
+        baseUnit: { select: { symbol: true } },
+        category: { select: { name: true } },
+        batches: {
+          where: { stockOnHandBaseQty: { gt: 0 } },
+          select: {
+            id: true,
+            batchNumber: true,
+            expiryDate: true,
+            stockOnHandBaseQty: true,
+          },
+          orderBy: { expiryDate: "asc" },
+        },
+      },
+      orderBy: { name: "asc" },
+    });
+    const today = pakistanDay(dayKey(new Date())).start;
+    const near = new Date(today.getTime() + filter.nearExpiryDays * 86_400_000);
+    const current = products.map((product) => {
+      const expired = product.batches
+        .filter((batch) => batch.expiryDate && asDate(batch.expiryDate) < today)
+        .reduce((sum, batch) => sum + batch.stockOnHandBaseQty, 0);
+      const available = product.stockOnHandBaseQty - expired;
+      return {
+        productId: product.id,
+        name: product.name,
+        sku: product.sku,
+        category: product.category?.name ?? null,
+        baseUnit: product.baseUnit.symbol,
+        currentBaseQty: product.stockOnHandBaseQty,
+        availableBaseQty: available,
+        reorderLevelBaseQty: product.reorderLevelBaseQty,
+        isLowStock: available <= product.reorderLevelBaseQty,
+      };
+    });
+    const batches = products.flatMap((product) =>
+      product.batches.map((batch) => ({
+        productId: product.id,
+        product: product.name,
+        sku: product.sku,
+        batchNumber: batch.batchNumber,
+        expiryDate: batch.expiryDate ? dateOnly(batch.expiryDate) : null,
+        stockBaseQty: batch.stockOnHandBaseQty,
+        baseUnit: product.baseUnit.symbol,
+        status:
+          batch.expiryDate && asDate(batch.expiryDate) < today
+            ? "EXPIRED"
+            : batch.expiryDate && asDate(batch.expiryDate) <= near
+              ? "NEAR_EXPIRY"
+              : "OK",
+      })),
+    );
+    return {
+      current,
+      lowStock: current.filter((row) => row.isLowStock),
+      batches,
+      nearExpiry: batches.filter((row) => row.status === "NEAR_EXPIRY"),
+      expiredBatches: batches.filter((row) => row.status === "EXPIRED"),
+    };
   }
 
-  async customerLedgers(filter: LedgerReportFilter) { const to = pakistanDay(filter.to).end; const from = pakistanDay(filter.from).start; const entries = await this.db.customerLedger.findMany({ where: { ...(filter.customerId ? { customerId: filter.customerId } : {}), occurredAt: { lte: to } }, select: { id: true, customerId: true, entryType: true, debitMinor: true, creditMinor: true, sourceType: true, sourceId: true, notes: true, dueDate: true, occurredAt: true, customer: { select: { id: true, code: true, name: true, businessName: true } } }, orderBy: { occurredAt: "asc" } }); const grouped = new Map<string, { partyId: string; code: string; name: string; debitMinor: number; creditMinor: number; periodDebitMinor: number; periodCreditMinor: number }>(); for (const entry of entries) { const p = entry.customer; const row = add(grouped, p.id, () => ({ partyId: p.id, code: p.code, name: p.businessName ?? p.name, debitMinor: 0, creditMinor: 0, periodDebitMinor: 0, periodCreditMinor: 0 })); row.debitMinor += entry.debitMinor; row.creditMinor += entry.creditMinor; if (entry.occurredAt >= from) { row.periodDebitMinor += entry.debitMinor; row.periodCreditMinor += entry.creditMinor; } } return { parties: [...grouped.values()].map((row) => ({ ...row, periodDebit: minorToMoney(row.periodDebitMinor), periodCredit: minorToMoney(row.periodCreditMinor), balance: minorToMoney(row.debitMinor - row.creditMinor) })).filter((row) => row.debitMinor !== row.creditMinor || row.periodDebitMinor || row.periodCreditMinor), entries: entries.filter((entry) => entry.occurredAt >= from).map((entry) => ({ ...entry, party: entry.customer, date: dayKey(entry.occurredAt), debit: minorToMoney(entry.debitMinor), credit: minorToMoney(entry.creditMinor) })) };
+  async writeOffs(filter: ReportDateFilter) {
+    const rows = await this.db.damageEntry.findMany({
+      where: {
+        status: "POSTED",
+        occurredAt: range(filter.from, filter.to),
+        ...(filter.productId ? { productId: filter.productId } : {}),
+        ...(filter.userId ? { createdById: filter.userId } : {}),
+        ...(filter.categoryId || filter.brandId
+          ? {
+              product: {
+                ...(filter.categoryId ? { categoryId: filter.categoryId } : {}),
+                ...(filter.brandId ? { brandId: filter.brandId } : {}),
+              },
+            }
+          : {}),
+      },
+      select: {
+        entryNumber: true,
+        type: true,
+        quantityBase: true,
+        reason: true,
+        occurredAt: true,
+        product: {
+          select: {
+            name: true,
+            sku: true,
+            baseUnit: { select: { symbol: true } },
+          },
+        },
+        batch: { select: { batchNumber: true, expiryDate: true } },
+        createdBy: { select: { displayName: true } },
+      },
+      orderBy: { occurredAt: "desc" },
+    });
+    return {
+      rows: rows.map((row) => ({ ...row, date: dayKey(row.occurredAt) })),
+      summary: {
+        damagedBaseQty: rows
+          .filter((row) => row.type === "DAMAGED")
+          .reduce((sum, row) => sum + row.quantityBase, 0),
+        expiredBaseQty: rows
+          .filter((row) => row.type === "EXPIRED")
+          .reduce((sum, row) => sum + row.quantityBase, 0),
+      },
+    };
   }
 
-  async supplierLedgerReport(filter: LedgerReportFilter) { const to = pakistanDay(filter.to).end; const from = pakistanDay(filter.from).start; const entries = await this.db.supplierLedger.findMany({ where: { ...(filter.supplierId ? { supplierId: filter.supplierId } : {}), occurredAt: { lte: to } }, select: { id: true, entryType: true, debitMinor: true, creditMinor: true, notes: true, occurredAt: true, supplier: { select: { id: true, code: true, name: true, businessName: true } } }, orderBy: { occurredAt: "asc" } }); const grouped = new Map<string, { partyId: string; code: string; name: string; debitMinor: number; creditMinor: number; periodDebitMinor: number; periodCreditMinor: number }>(); for (const entry of entries) { const p = entry.supplier; const row = add(grouped, p.id, () => ({ partyId: p.id, code: p.code, name: p.businessName ?? p.name, debitMinor: 0, creditMinor: 0, periodDebitMinor: 0, periodCreditMinor: 0 })); row.debitMinor += entry.debitMinor; row.creditMinor += entry.creditMinor; if (entry.occurredAt >= from) { row.periodDebitMinor += entry.debitMinor; row.periodCreditMinor += entry.creditMinor; } } return { parties: [...grouped.values()].map((row) => ({ ...row, periodDebit: minorToMoney(row.periodDebitMinor), periodCredit: minorToMoney(row.periodCreditMinor), balance: minorToMoney(row.creditMinor - row.debitMinor) })), entries: entries.filter((entry) => entry.occurredAt >= from).map((entry) => ({ ...entry, party: entry.supplier, date: dayKey(entry.occurredAt), debit: minorToMoney(entry.debitMinor), credit: minorToMoney(entry.creditMinor) })) };
+  async customerLedgers(filter: LedgerReportFilter) {
+    const to = pakistanDay(filter.to).end;
+    const from = pakistanDay(filter.from).start;
+    const entries = await this.db.customerLedger.findMany({
+      where: {
+        ...(filter.customerId ? { customerId: filter.customerId } : {}),
+        occurredAt: { lte: to },
+      },
+      select: {
+        id: true,
+        customerId: true,
+        entryType: true,
+        debitMinor: true,
+        creditMinor: true,
+        sourceType: true,
+        sourceId: true,
+        notes: true,
+        dueDate: true,
+        occurredAt: true,
+        customer: {
+          select: { id: true, code: true, name: true, businessName: true },
+        },
+      },
+      orderBy: { occurredAt: "asc" },
+    });
+    const grouped = new Map<
+      string,
+      {
+        partyId: string;
+        code: string;
+        name: string;
+        debitMinor: number;
+        creditMinor: number;
+        periodDebitMinor: number;
+        periodCreditMinor: number;
+      }
+    >();
+    for (const entry of entries) {
+      const p = entry.customer;
+      const row = add(grouped, p.id, () => ({
+        partyId: p.id,
+        code: p.code,
+        name: p.businessName ?? p.name,
+        debitMinor: 0,
+        creditMinor: 0,
+        periodDebitMinor: 0,
+        periodCreditMinor: 0,
+      }));
+      row.debitMinor += entry.debitMinor;
+      row.creditMinor += entry.creditMinor;
+      if (asDate(entry.occurredAt) >= from) {
+        row.periodDebitMinor += entry.debitMinor;
+        row.periodCreditMinor += entry.creditMinor;
+      }
+    }
+    return {
+      parties: [...grouped.values()]
+        .map((row) => ({
+          ...row,
+          periodDebit: minorToMoney(row.periodDebitMinor),
+          periodCredit: minorToMoney(row.periodCreditMinor),
+          balance: minorToMoney(row.debitMinor - row.creditMinor),
+        }))
+        .filter(
+          (row) =>
+            row.debitMinor !== row.creditMinor ||
+            row.periodDebitMinor ||
+            row.periodCreditMinor,
+        ),
+      entries: entries
+        .filter((entry) => asDate(entry.occurredAt) >= from)
+        .map((entry) => ({
+          ...entry,
+          party: entry.customer,
+          date: dayKey(entry.occurredAt),
+          debit: minorToMoney(entry.debitMinor),
+          credit: minorToMoney(entry.creditMinor),
+        })),
+    };
   }
 
-  async expenses(filter: ReportDateFilter) { const rows = await this.db.expense.findMany({ where: { incurredAt: range(filter.from, filter.to), status: "POSTED", ...(filter.paymentMethod ? { method: filter.paymentMethod } : {}) }, select: { voucherNumber: true, category: true, description: true, amountMinor: true, method: true, incurredAt: true, createdBy: { select: { displayName: true } } }, orderBy: { incurredAt: "desc" } }); const categories = new Map<string, number>(); rows.forEach((row) => categories.set(row.category, (categories.get(row.category) ?? 0) + row.amountMinor)); return { rows: rows.map((row) => ({ ...row, date: dayKey(row.incurredAt), amount: minorToMoney(row.amountMinor) })), categories: [...categories].map(([category, amountMinor]) => ({ category, amount: minorToMoney(amountMinor) })), total: minorToMoney(rows.reduce((sum, row) => sum + row.amountMinor, 0)) };
+  async supplierLedgerReport(filter: LedgerReportFilter) {
+    const to = pakistanDay(filter.to).end;
+    const from = pakistanDay(filter.from).start;
+    const entries = await this.db.supplierLedger.findMany({
+      where: {
+        ...(filter.supplierId ? { supplierId: filter.supplierId } : {}),
+        occurredAt: { lte: to },
+      },
+      select: {
+        id: true,
+        entryType: true,
+        debitMinor: true,
+        creditMinor: true,
+        notes: true,
+        occurredAt: true,
+        supplier: {
+          select: { id: true, code: true, name: true, businessName: true },
+        },
+      },
+      orderBy: { occurredAt: "asc" },
+    });
+    const grouped = new Map<
+      string,
+      {
+        partyId: string;
+        code: string;
+        name: string;
+        debitMinor: number;
+        creditMinor: number;
+        periodDebitMinor: number;
+        periodCreditMinor: number;
+      }
+    >();
+    for (const entry of entries) {
+      const p = entry.supplier;
+      const row = add(grouped, p.id, () => ({
+        partyId: p.id,
+        code: p.code,
+        name: p.businessName ?? p.name,
+        debitMinor: 0,
+        creditMinor: 0,
+        periodDebitMinor: 0,
+        periodCreditMinor: 0,
+      }));
+      row.debitMinor += entry.debitMinor;
+      row.creditMinor += entry.creditMinor;
+      if (asDate(entry.occurredAt) >= from) {
+        row.periodDebitMinor += entry.debitMinor;
+        row.periodCreditMinor += entry.creditMinor;
+      }
+    }
+    return {
+      parties: [...grouped.values()].map((row) => ({
+        ...row,
+        periodDebit: minorToMoney(row.periodDebitMinor),
+        periodCredit: minorToMoney(row.periodCreditMinor),
+        balance: minorToMoney(row.creditMinor - row.debitMinor),
+      })),
+      entries: entries
+        .filter((entry) => asDate(entry.occurredAt) >= from)
+        .map((entry) => ({
+          ...entry,
+          party: entry.supplier,
+          date: dayKey(entry.occurredAt),
+          debit: minorToMoney(entry.debitMinor),
+          credit: minorToMoney(entry.creditMinor),
+        })),
+    };
+  }
+
+  async expenses(filter: ReportDateFilter) {
+    const rows = await this.db.expense.findMany({
+      where: {
+        incurredAt: range(filter.from, filter.to),
+        status: "POSTED",
+        ...(filter.userId ? { createdById: filter.userId } : {}),
+        ...(filter.paymentMethod ? { method: filter.paymentMethod } : {}),
+      },
+      select: {
+        voucherNumber: true,
+        category: true,
+        description: true,
+        amountMinor: true,
+        method: true,
+        incurredAt: true,
+        createdBy: { select: { displayName: true } },
+      },
+      orderBy: { incurredAt: "desc" },
+    });
+    const categories = new Map<string, number>();
+    rows.forEach((row) =>
+      categories.set(
+        row.category,
+        (categories.get(row.category) ?? 0) + row.amountMinor,
+      ),
+    );
+    return {
+      rows: rows.map((row) => ({
+        ...row,
+        date: dayKey(row.incurredAt),
+        amount: minorToMoney(row.amountMinor),
+      })),
+      categories: [...categories].map(([category, amountMinor]) => ({
+        category,
+        amount: minorToMoney(amountMinor),
+      })),
+      total: minorToMoney(rows.reduce((sum, row) => sum + row.amountMinor, 0)),
+    };
   }
 
   async salesAnalysis(filter: ReportDateFilter) {
-    const itemWhere: Prisma.SaleItemWhereInput = { ...(filter.productId ? { productId: filter.productId } : {}), ...((filter.categoryId || filter.brandId) ? { product: { ...(filter.categoryId ? { categoryId: filter.categoryId } : {}), ...(filter.brandId ? { brandId: filter.brandId } : {}) } } : {}) };
+    const itemWhere = productItemWhere(filter);
+    const scoped = hasProductFilter(filter);
     const sales = await this.db.sale.findMany({
-      where: { status: "POSTED", soldAt: range(filter.from, filter.to), ...(filter.customerId ? { customerId: filter.customerId } : {}), ...(filter.userId ? { createdById: filter.userId } : {}), ...(filter.paymentStatus ? { paymentStatus: filter.paymentStatus } : {}), ...(filter.paymentMethod ? { payments: { some: { method: filter.paymentMethod, status: "POSTED" } } } : {}), ...((filter.productId || filter.categoryId || filter.brandId) ? { items: { some: itemWhere } } : {}) },
+      where: {
+        status: "POSTED",
+        soldAt: range(filter.from, filter.to),
+        ...(filter.customerId ? { customerId: filter.customerId } : {}),
+        ...(filter.userId ? { createdById: filter.userId } : {}),
+        ...(filter.paymentStatus
+          ? { paymentStatus: filter.paymentStatus }
+          : {}),
+        ...(filter.paymentMethod
+          ? {
+              payments: {
+                some: { method: filter.paymentMethod, status: "POSTED" },
+              },
+            }
+          : {}),
+        ...(scoped ? { items: { some: itemWhere } } : {}),
+      },
       select: {
-        id: true, invoiceNumber: true, soldAt: true, paymentStatus: true, subtotalMinor: true, discountMinor: true, taxMinor: true, totalMinor: true, paidMinor: true,
-        customer: { select: { id: true, name: true, businessName: true } }, createdBy: { select: { id: true, displayName: true } }, payments: { where: { status: "POSTED" }, select: { method: true } },
-        items: { where: itemWhere, select: { productId: true, quantityBase: true, costPriceMinor: true, discountMinor: true, taxMinor: true, lineTotalMinor: true, product: { select: { name: true, sku: true, category: { select: { id: true, name: true } }, brand: { select: { name: true } } } } } },
+        id: true,
+        invoiceNumber: true,
+        soldAt: true,
+        paymentStatus: true,
+        subtotalMinor: true,
+        discountMinor: true,
+        taxMinor: true,
+        totalMinor: true,
+        paidMinor: true,
+        customer: { select: { id: true, name: true, businessName: true } },
+        createdBy: { select: { id: true, displayName: true } },
+        payments: { where: { status: "POSTED" }, select: { method: true } },
+        items: {
+          where: itemWhere,
+          select: {
+            productId: true,
+            quantityBase: true,
+            costPriceMinor: true,
+            discountMinor: true,
+            taxMinor: true,
+            lineTotalMinor: true,
+            product: {
+              select: {
+                name: true,
+                sku: true,
+                category: { select: { id: true, name: true } },
+                brand: { select: { name: true } },
+              },
+            },
+          },
+        },
       },
       orderBy: { soldAt: "desc" },
     });
-    const categories = new Map<string, { categoryId: string | null; category: string; quantityBase: number; salesMinor: number; costMinor: number }>(); const users = new Map<string, { userId: string; user: string; invoiceCount: number; salesMinor: number }>();
-    const rows = sales.map((sale) => { const salesMinor = sale.items.reduce((sum, item) => sum + item.lineTotalMinor, 0); const costMinor = sale.items.reduce((sum, item) => sum + item.costPriceMinor * item.quantityBase, 0); for (const item of sale.items) { const key = item.product.category?.id ?? "UNCATEGORIZED"; const row = add(categories, key, () => ({ categoryId: item.product.category?.id ?? null, category: item.product.category?.name ?? "Uncategorized", quantityBase: 0, salesMinor: 0, costMinor: 0 })); row.quantityBase += item.quantityBase; row.salesMinor += item.lineTotalMinor; row.costMinor += item.costPriceMinor * item.quantityBase; } const staff = add(users, sale.createdBy.id, () => ({ userId: sale.createdBy.id, user: sale.createdBy.displayName, invoiceCount: 0, salesMinor: 0 })); staff.invoiceCount++; staff.salesMinor += salesMinor; return { id: sale.id, date: dayKey(sale.soldAt), invoiceNumber: sale.invoiceNumber, customerId: sale.customer?.id ?? null, customer: sale.customer?.businessName ?? sale.customer?.name ?? "Walk-in customer", user: sale.createdBy.displayName, paymentStatus: sale.paymentStatus, paymentMethods: [...new Set(sale.payments.map((payment) => payment.method))].join(", ") || "CREDIT", quantityBase: sale.items.reduce((sum, item) => sum + item.quantityBase, 0), subtotal: minorToMoney(sale.subtotalMinor), discount: minorToMoney(sale.discountMinor), tax: minorToMoney(sale.taxMinor), sales: minorToMoney(salesMinor), cost: minorToMoney(costMinor), profit: minorToMoney(salesMinor - costMinor), paid: minorToMoney(Math.min(sale.paidMinor, sale.totalMinor)), due: minorToMoney(Math.max(0, sale.totalMinor - sale.paidMinor)) }; });
-    const totalSalesMinor = sales.reduce((sum, sale) => sum + sale.items.reduce((value, item) => value + item.lineTotalMinor, 0), 0); const totalCostMinor = sales.reduce((sum, sale) => sum + sale.items.reduce((value, item) => value + item.costPriceMinor * item.quantityBase, 0), 0); return { summary: { totalRecords: rows.length, totalSales: minorToMoney(totalSalesMinor), grossProfit: minorToMoney(totalSalesMinor - totalCostMinor), totalTax: minorToMoney(sales.reduce((sum, sale) => sum + sale.taxMinor, 0)), totalDiscount: minorToMoney(sales.reduce((sum, sale) => sum + sale.discountMinor, 0)), outstandingReceivables: minorToMoney(sales.reduce((sum, sale) => sum + Math.max(0, sale.totalMinor - sale.paidMinor), 0)) }, rows, pending: rows.filter((row) => row.paymentStatus !== "PAID"), categories: [...categories.values()].map((row) => ({ ...row, sales: minorToMoney(row.salesMinor), cost: minorToMoney(row.costMinor), profit: minorToMoney(row.salesMinor - row.costMinor) })).sort((a, b) => b.salesMinor - a.salesMinor), users: [...users.values()].map(moneyRow).sort((a, b) => b.salesMinor - a.salesMinor) };
+    const categories = new Map<
+      string,
+      {
+        categoryId: string | null;
+        category: string;
+        quantityBase: number;
+        salesMinor: number;
+        costMinor: number;
+      }
+    >();
+    const users = new Map<
+      string,
+      { userId: string; user: string; invoiceCount: number; salesMinor: number }
+    >();
+    const rows = sales.map((sale) => {
+      const salesMinor = sale.items.reduce(
+        (sum, item) => sum + item.lineTotalMinor,
+        0,
+      );
+      const taxMinor = scoped
+        ? sale.items.reduce((sum, item) => sum + item.taxMinor, 0)
+        : sale.taxMinor;
+      const discountMinor = scoped
+        ? sale.items.reduce((sum, item) => sum + item.discountMinor, 0)
+        : sale.discountMinor;
+      const subtotalMinor = scoped
+        ? salesMinor - taxMinor + discountMinor
+        : sale.subtotalMinor;
+      const costMinor = sale.items.reduce(
+        (sum, item) => sum + item.costPriceMinor * item.quantityBase,
+        0,
+      );
+      for (const item of sale.items) {
+        const key = item.product.category?.id ?? "UNCATEGORIZED";
+        const row = add(categories, key, () => ({
+          categoryId: item.product.category?.id ?? null,
+          category: item.product.category?.name ?? "Uncategorized",
+          quantityBase: 0,
+          salesMinor: 0,
+          costMinor: 0,
+        }));
+        row.quantityBase += item.quantityBase;
+        row.salesMinor += item.lineTotalMinor;
+        row.costMinor += item.costPriceMinor * item.quantityBase;
+      }
+      const staff = add(users, sale.createdBy.id, () => ({
+        userId: sale.createdBy.id,
+        user: sale.createdBy.displayName,
+        invoiceCount: 0,
+        salesMinor: 0,
+      }));
+      staff.invoiceCount++;
+      staff.salesMinor += salesMinor;
+      return {
+        id: sale.id,
+        date: dayKey(sale.soldAt),
+        invoiceNumber: sale.invoiceNumber,
+        customerId: sale.customer?.id ?? null,
+        customer:
+          sale.customer?.businessName ??
+          sale.customer?.name ??
+          "Walk-in customer",
+        user: sale.createdBy.displayName,
+        paymentStatus: sale.paymentStatus,
+        paymentMethods:
+          [...new Set(sale.payments.map((payment) => payment.method))].join(
+            ", ",
+          ) || "CREDIT",
+        quantityBase: sale.items.reduce(
+          (sum, item) => sum + item.quantityBase,
+          0,
+        ),
+        subtotal: minorToMoney(subtotalMinor),
+        discount: minorToMoney(discountMinor),
+        tax: minorToMoney(taxMinor),
+        sales: minorToMoney(salesMinor),
+        cost: minorToMoney(costMinor),
+        profit: minorToMoney(salesMinor - costMinor),
+        paid: minorToMoney(Math.min(sale.paidMinor, salesMinor)),
+        due: minorToMoney(Math.max(0, salesMinor - sale.paidMinor)),
+      };
+    });
+    const totalSalesMinor = sales.reduce(
+      (sum, sale) =>
+        sum +
+        sale.items.reduce((value, item) => value + item.lineTotalMinor, 0),
+      0,
+    );
+    const totalCostMinor = sales.reduce(
+      (sum, sale) =>
+        sum +
+        sale.items.reduce(
+          (value, item) => value + item.costPriceMinor * item.quantityBase,
+          0,
+        ),
+      0,
+    );
+    return {
+      summary: {
+        totalRecords: rows.length,
+        totalSales: minorToMoney(totalSalesMinor),
+        grossProfit: minorToMoney(totalSalesMinor - totalCostMinor),
+        totalTax: minorToMoney(
+          scoped
+            ? sales.reduce(
+                (sum, sale) =>
+                  sum +
+                  sale.items.reduce((value, item) => value + item.taxMinor, 0),
+                0,
+              )
+            : sales.reduce((sum, sale) => sum + sale.taxMinor, 0),
+        ),
+        totalDiscount: minorToMoney(
+          scoped
+            ? sales.reduce(
+                (sum, sale) =>
+                  sum +
+                  sale.items.reduce(
+                    (value, item) => value + item.discountMinor,
+                    0,
+                  ),
+                0,
+              )
+            : sales.reduce((sum, sale) => sum + sale.discountMinor, 0),
+        ),
+        outstandingReceivables: minorToMoney(
+          sales.reduce((sum, sale) => {
+            const saleMinor = sale.items.reduce(
+              (value, item) => value + item.lineTotalMinor,
+              0,
+            );
+            return sum + Math.max(0, saleMinor - sale.paidMinor);
+          }, 0),
+        ),
+      },
+      rows,
+      pending: rows.filter((row) => row.paymentStatus !== "PAID"),
+      categories: [...categories.values()]
+        .map((row) => ({
+          ...row,
+          sales: minorToMoney(row.salesMinor),
+          cost: minorToMoney(row.costMinor),
+          profit: minorToMoney(row.salesMinor - row.costMinor),
+        }))
+        .sort((a, b) => b.salesMinor - a.salesMinor),
+      users: [...users.values()]
+        .map(moneyRow)
+        .sort((a, b) => b.salesMinor - a.salesMinor),
+    };
   }
 
   async purchaseAnalysis(filter: ReportDateFilter) {
-    const itemWhere: Prisma.PurchaseItemWhereInput = { ...(filter.productId ? { productId: filter.productId } : {}), ...((filter.categoryId || filter.brandId) ? { product: { ...(filter.categoryId ? { categoryId: filter.categoryId } : {}), ...(filter.brandId ? { brandId: filter.brandId } : {}) } } : {}) };
-    const purchases = await this.db.purchase.findMany({ where: { status: "POSTED", purchasedAt: range(filter.from, filter.to), ...(filter.supplierId ? { supplierId: filter.supplierId } : {}), ...(filter.userId ? { createdById: filter.userId } : {}), ...(filter.paymentStatus ? { paymentStatus: filter.paymentStatus } : {}), ...(filter.paymentMethod ? { payments: { some: { method: filter.paymentMethod, status: "POSTED" } } } : {}), ...((filter.productId || filter.categoryId || filter.brandId) ? { items: { some: itemWhere } } : {}) }, select: { id: true, invoiceNumber: true, supplierInvoice: true, purchasedAt: true, paymentStatus: true, subtotalMinor: true, discountMinor: true, taxMinor: true, totalMinor: true, paidMinor: true, supplier: { select: { id: true, name: true, businessName: true } }, createdBy: { select: { displayName: true } }, payments: { where: { status: "POSTED" }, select: { method: true } }, items: { where: itemWhere, select: { quantityBase: true, lineTotalMinor: true } } }, orderBy: { purchasedAt: "desc" } });
-    const rows = purchases.map((purchase) => { const filteredMinor = purchase.items.reduce((sum, item) => sum + item.lineTotalMinor, 0); const amountMinor = filter.productId || filter.categoryId || filter.brandId ? filteredMinor : purchase.totalMinor; return { id: purchase.id, date: dayKey(purchase.purchasedAt), invoiceNumber: purchase.invoiceNumber, supplierInvoice: purchase.supplierInvoice, supplierId: purchase.supplier.id, supplier: purchase.supplier.businessName ?? purchase.supplier.name, user: purchase.createdBy.displayName, paymentStatus: purchase.paymentStatus, paymentMethods: [...new Set(purchase.payments.map((payment) => payment.method))].join(", ") || "CREDIT", quantityBase: purchase.items.reduce((sum, item) => sum + item.quantityBase, 0), subtotal: minorToMoney(purchase.subtotalMinor), discount: minorToMoney(purchase.discountMinor), tax: minorToMoney(purchase.taxMinor), purchases: minorToMoney(amountMinor), paid: minorToMoney(Math.min(purchase.paidMinor, purchase.totalMinor)), due: minorToMoney(Math.max(0, purchase.totalMinor - purchase.paidMinor)) }; }); const totalMinor = rows.reduce((sum, row) => sum + Math.round(Number(row.purchases) * 100), 0); return { summary: { totalRecords: rows.length, totalPurchases: minorToMoney(totalMinor), totalTax: minorToMoney(purchases.reduce((sum, row) => sum + row.taxMinor, 0)), totalDiscount: minorToMoney(purchases.reduce((sum, row) => sum + row.discountMinor, 0)), outstandingPayables: minorToMoney(purchases.reduce((sum, row) => sum + Math.max(0, row.totalMinor - row.paidMinor), 0)) }, rows, outstanding: rows.filter((row) => row.paymentStatus !== "PAID") };
+    const itemWhere = productItemWhere(filter);
+    const scoped = hasProductFilter(filter);
+    const purchases = await this.db.purchase.findMany({
+      where: {
+        status: "POSTED",
+        purchasedAt: range(filter.from, filter.to),
+        ...(filter.supplierId ? { supplierId: filter.supplierId } : {}),
+        ...(filter.userId ? { createdById: filter.userId } : {}),
+        ...(filter.paymentStatus
+          ? { paymentStatus: filter.paymentStatus }
+          : {}),
+        ...(filter.paymentMethod
+          ? {
+              payments: {
+                some: { method: filter.paymentMethod, status: "POSTED" },
+              },
+            }
+          : {}),
+        ...(scoped ? { items: { some: itemWhere } } : {}),
+      },
+      select: {
+        id: true,
+        invoiceNumber: true,
+        supplierInvoice: true,
+        purchasedAt: true,
+        paymentStatus: true,
+        subtotalMinor: true,
+        discountMinor: true,
+        taxMinor: true,
+        totalMinor: true,
+        paidMinor: true,
+        supplier: { select: { id: true, name: true, businessName: true } },
+        createdBy: { select: { displayName: true } },
+        payments: { where: { status: "POSTED" }, select: { method: true } },
+        items: {
+          where: itemWhere,
+          select: {
+            quantityBase: true,
+            discountMinor: true,
+            taxMinor: true,
+            lineTotalMinor: true,
+          },
+        },
+      },
+      orderBy: { purchasedAt: "desc" },
+    });
+    const rows = purchases.map((purchase) => {
+      const filteredMinor = purchase.items.reduce(
+        (sum, item) => sum + item.lineTotalMinor,
+        0,
+      );
+      const amountMinor = scoped ? filteredMinor : purchase.totalMinor;
+      const taxMinor = scoped
+        ? purchase.items.reduce((sum, item) => sum + item.taxMinor, 0)
+        : purchase.taxMinor;
+      const discountMinor = scoped
+        ? purchase.items.reduce((sum, item) => sum + item.discountMinor, 0)
+        : purchase.discountMinor;
+      const subtotalMinor = scoped
+        ? amountMinor - taxMinor + discountMinor
+        : purchase.subtotalMinor;
+      return {
+        id: purchase.id,
+        date: dayKey(purchase.purchasedAt),
+        invoiceNumber: purchase.invoiceNumber,
+        supplierInvoice: purchase.supplierInvoice,
+        supplierId: purchase.supplier.id,
+        supplier: purchase.supplier.businessName ?? purchase.supplier.name,
+        user: purchase.createdBy.displayName,
+        paymentStatus: purchase.paymentStatus,
+        paymentMethods:
+          [...new Set(purchase.payments.map((payment) => payment.method))].join(
+            ", ",
+          ) || "CREDIT",
+        quantityBase: purchase.items.reduce(
+          (sum, item) => sum + item.quantityBase,
+          0,
+        ),
+        subtotal: minorToMoney(subtotalMinor),
+        discount: minorToMoney(discountMinor),
+        tax: minorToMoney(taxMinor),
+        purchases: minorToMoney(amountMinor),
+        paid: minorToMoney(Math.min(purchase.paidMinor, amountMinor)),
+        due: minorToMoney(Math.max(0, amountMinor - purchase.paidMinor)),
+      };
+    });
+    const totalMinor = purchases.reduce(
+      (sum, purchase) =>
+        sum +
+        (scoped
+          ? purchase.items.reduce(
+              (value, item) => value + item.lineTotalMinor,
+              0,
+            )
+          : purchase.totalMinor),
+      0,
+    );
+    return {
+      summary: {
+        totalRecords: rows.length,
+        totalPurchases: minorToMoney(totalMinor),
+        totalTax: minorToMoney(
+          scoped
+            ? purchases.reduce(
+                (sum, row) =>
+                  sum +
+                  row.items.reduce((value, item) => value + item.taxMinor, 0),
+                0,
+              )
+            : purchases.reduce((sum, row) => sum + row.taxMinor, 0),
+        ),
+        totalDiscount: minorToMoney(
+          scoped
+            ? purchases.reduce(
+                (sum, row) =>
+                  sum +
+                  row.items.reduce(
+                    (value, item) => value + item.discountMinor,
+                    0,
+                  ),
+                0,
+              )
+            : purchases.reduce((sum, row) => sum + row.discountMinor, 0),
+        ),
+        outstandingPayables: minorToMoney(
+          purchases.reduce((sum, row) => {
+            const amountMinor = scoped
+              ? row.items.reduce(
+                  (value, item) => value + item.lineTotalMinor,
+                  0,
+                )
+              : row.totalMinor;
+            return sum + Math.max(0, amountMinor - row.paidMinor);
+          }, 0),
+        ),
+      },
+      rows,
+      outstanding: rows.filter((row) => row.paymentStatus !== "PAID"),
+    };
   }
 
-  async salesReturns(filter: ReportDateFilter) { const rows = await this.db.salesReturn.findMany({ where: { status: "POSTED", returnedAt: range(filter.from, filter.to), ...(filter.customerId ? { customerId: filter.customerId } : {}), ...(filter.userId ? { createdById: filter.userId } : {}), ...((filter.productId || filter.categoryId || filter.brandId) ? { items: { some: { ...(filter.productId ? { productId: filter.productId } : {}), ...((filter.categoryId || filter.brandId) ? { product: { ...(filter.categoryId ? { categoryId: filter.categoryId } : {}), ...(filter.brandId ? { brandId: filter.brandId } : {}) } } : {}) } } } : {}) }, include: { sale: { select: { invoiceNumber: true } }, customer: { select: { id: true, name: true, businessName: true } }, createdBy: { select: { displayName: true } }, items: { include: { product: { select: { name: true, sku: true } } } } }, orderBy: { returnedAt: "desc" } }); const result = rows.map((row) => ({ id: row.id, date: dayKey(row.returnedAt), returnNumber: row.returnNumber, invoiceNumber: row.sale.invoiceNumber, customerId: row.customer?.id ?? null, customer: row.customer?.businessName ?? row.customer?.name ?? "Walk-in customer", products: row.items.map((item) => `${item.product.name} (${item.quantityBase})`).join(", "), quantityBase: row.items.reduce((sum, item) => sum + item.quantityBase, 0), refundMethod: row.refundMethod, reason: row.reason, total: minorToMoney(row.returnTotalMinor), refund: minorToMoney(row.refundMinor), user: row.createdBy.displayName })); return { summary: { totalRecords: result.length, returnValue: minorToMoney(rows.reduce((sum, row) => sum + row.returnTotalMinor, 0)), refunded: minorToMoney(rows.reduce((sum, row) => sum + row.refundMinor, 0)) }, rows: result }; }
-
-  async purchaseReturns(filter: ReportDateFilter) { const rows = await this.db.purchaseReturn.findMany({ where: { status: "POSTED", returnedAt: range(filter.from, filter.to), ...(filter.supplierId ? { supplierId: filter.supplierId } : {}), ...(filter.userId ? { createdById: filter.userId } : {}), ...((filter.productId || filter.categoryId || filter.brandId) ? { items: { some: { ...(filter.productId ? { productId: filter.productId } : {}), ...((filter.categoryId || filter.brandId) ? { product: { ...(filter.categoryId ? { categoryId: filter.categoryId } : {}), ...(filter.brandId ? { brandId: filter.brandId } : {}) } } : {}) } } } : {}) }, include: { purchase: { select: { invoiceNumber: true } }, supplier: { select: { id: true, name: true, businessName: true } }, createdBy: { select: { displayName: true } }, items: { include: { product: { select: { name: true } } } } }, orderBy: { returnedAt: "desc" } }); const result = rows.map((row) => ({ id: row.id, date: dayKey(row.returnedAt), returnNumber: row.returnNumber, invoiceNumber: row.purchase.invoiceNumber, supplierId: row.supplier.id, supplier: row.supplier.businessName ?? row.supplier.name, products: row.items.map((item) => `${item.product.name} (${item.quantityBase})`).join(", "), quantityBase: row.items.reduce((sum, item) => sum + item.quantityBase, 0), method: row.method, reason: row.reason, total: minorToMoney(row.totalMinor), user: row.createdBy.displayName })); return { summary: { totalRecords: result.length, returnValue: minorToMoney(rows.reduce((sum, row) => sum + row.totalMinor, 0)) }, rows: result }; }
-
-  async stockMovements(filter: ReportDateFilter) { const rows = await this.db.stockMovement.findMany({ where: { createdAt: range(filter.from, filter.to), ...(filter.productId ? { productId: filter.productId } : {}), ...(filter.userId ? { createdById: filter.userId } : {}), ...((filter.categoryId || filter.brandId) ? { product: { ...(filter.categoryId ? { categoryId: filter.categoryId } : {}), ...(filter.brandId ? { brandId: filter.brandId } : {}) } } : {}) }, include: { product: { select: { id: true, name: true, sku: true, category: { select: { name: true } }, brand: { select: { name: true } } } }, batch: { select: { batchNumber: true } }, createdBy: { select: { displayName: true } } }, orderBy: { createdAt: "desc" } }); const result = rows.map((row) => ({ id: row.id, date: dayKey(row.createdAt), productId: row.product.id, product: row.product.name, sku: row.product.sku, category: row.product.category?.name ?? null, brand: row.product.brand?.name ?? null, batch: row.batch?.batchNumber ?? null, type: row.movementType, quantityBase: row.quantityBase, balanceAfterBase: row.balanceAfterBase, unitCost: minorToMoney(row.unitCostMinor), value: minorToMoney(row.valueMinor), source: row.sourceType, reference: row.sourceId, user: row.createdBy.displayName })); return { summary: { totalRecords: result.length, inboundQuantity: rows.filter((row) => row.quantityBase > 0).reduce((sum, row) => sum + row.quantityBase, 0), outboundQuantity: Math.abs(rows.filter((row) => row.quantityBase < 0).reduce((sum, row) => sum + row.quantityBase, 0)), movementValue: minorToMoney(rows.reduce((sum, row) => sum + Math.abs(row.valueMinor), 0)) }, rows: result, adjustments: result.filter((row) => ["ADJUSTMENT_IN", "ADJUSTMENT_OUT", "STOCK_COUNT_IN", "STOCK_COUNT_OUT"].includes(row.type)) };
+  async salesReturns(filter: ReportDateFilter) {
+    const itemWhere = productItemWhere(filter);
+    const scoped = hasProductFilter(filter);
+    const rows = await this.db.salesReturn.findMany({
+      where: {
+        status: "POSTED",
+        returnedAt: range(filter.from, filter.to),
+        ...(filter.customerId ? { customerId: filter.customerId } : {}),
+        ...(filter.userId ? { createdById: filter.userId } : {}),
+        ...(scoped ? { items: { some: itemWhere } } : {}),
+      },
+      include: {
+        sale: { select: { invoiceNumber: true } },
+        customer: { select: { id: true, name: true, businessName: true } },
+        createdBy: { select: { displayName: true } },
+        items: {
+          where: itemWhere,
+          include: { product: { select: { name: true, sku: true } } },
+        },
+      },
+      orderBy: { returnedAt: "desc" },
+    });
+    const result = rows.map((row) => {
+      const returnTotalMinor = scoped
+        ? row.items.reduce((sum, item) => sum + item.lineTotalMinor, 0)
+        : row.returnTotalMinor;
+      const refundMinor = Math.min(row.refundMinor, returnTotalMinor);
+      return {
+        id: row.id,
+        date: dayKey(row.returnedAt),
+        returnNumber: row.returnNumber,
+        invoiceNumber: row.sale.invoiceNumber,
+        customerId: row.customer?.id ?? null,
+        customer:
+          row.customer?.businessName ??
+          row.customer?.name ??
+          "Walk-in customer",
+        products: row.items
+          .map((item) => `${item.product.name} (${item.quantityBase})`)
+          .join(", "),
+        quantityBase: row.items.reduce(
+          (sum, item) => sum + item.quantityBase,
+          0,
+        ),
+        refundMethod: row.refundMethod,
+        reason: row.reason,
+        total: minorToMoney(returnTotalMinor),
+        refund: minorToMoney(refundMinor),
+        user: row.createdBy.displayName,
+        returnTotalMinor,
+        refundMinor,
+      };
+    });
+    return {
+      summary: {
+        totalRecords: result.length,
+        returnValue: minorToMoney(
+          result.reduce((sum, row) => sum + row.returnTotalMinor, 0),
+        ),
+        refunded: minorToMoney(
+          result.reduce((sum, row) => sum + row.refundMinor, 0),
+        ),
+      },
+      rows: result.map(
+        ({
+          returnTotalMinor: _returnTotalMinor,
+          refundMinor: _refundMinor,
+          ...row
+        }) => row,
+      ),
+    };
   }
 
-  async inventoryValuation(filter: InventoryReportFilter) { const products = await this.db.product.findMany({ where: { deletedAt: null, isActive: true, ...(filter.productId ? { id: filter.productId } : {}), ...(filter.categoryId ? { categoryId: filter.categoryId } : {}), ...(filter.brandId ? { brandId: filter.brandId } : {}) }, include: { category: { select: { name: true } }, brand: { select: { name: true } }, baseUnit: { select: { symbol: true } } }, orderBy: { name: "asc" } }); const rows = products.map((product) => ({ productId: product.id, product: product.name, sku: product.sku, category: product.category?.name ?? null, brand: product.brand?.name ?? null, unit: product.baseUnit.symbol, stockBaseQty: product.stockOnHandBaseQty, averageCost: minorToMoney(product.averageCostMinor), inventoryValue: minorToMoney(product.inventoryValueMinor), status: product.stockOnHandBaseQty <= 0 ? "OUT_OF_STOCK" : product.stockOnHandBaseQty <= product.reorderLevelBaseQty ? "LOW_STOCK" : "IN_STOCK" })); return { summary: { totalRecords: rows.length, inventoryValue: minorToMoney(products.reduce((sum, row) => sum + row.inventoryValueMinor, 0)), lowStock: rows.filter((row) => row.status === "LOW_STOCK").length, outOfStock: rows.filter((row) => row.status === "OUT_OF_STOCK").length }, rows, lowStock: rows.filter((row) => row.status === "LOW_STOCK"), outOfStock: rows.filter((row) => row.status === "OUT_OF_STOCK") };
+  async purchaseReturns(filter: ReportDateFilter) {
+    const itemWhere = productItemWhere(filter);
+    const scoped = hasProductFilter(filter);
+    const rows = await this.db.purchaseReturn.findMany({
+      where: {
+        status: "POSTED",
+        returnedAt: range(filter.from, filter.to),
+        ...(filter.supplierId ? { supplierId: filter.supplierId } : {}),
+        ...(filter.userId ? { createdById: filter.userId } : {}),
+        ...(scoped ? { items: { some: itemWhere } } : {}),
+      },
+      include: {
+        purchase: { select: { invoiceNumber: true } },
+        supplier: { select: { id: true, name: true, businessName: true } },
+        createdBy: { select: { displayName: true } },
+        items: {
+          where: itemWhere,
+          include: { product: { select: { name: true } } },
+        },
+      },
+      orderBy: { returnedAt: "desc" },
+    });
+    const result = rows.map((row) => {
+      const totalMinor = scoped
+        ? row.items.reduce((sum, item) => sum + item.lineTotalMinor, 0)
+        : row.totalMinor;
+      return {
+        id: row.id,
+        date: dayKey(row.returnedAt),
+        returnNumber: row.returnNumber,
+        invoiceNumber: row.purchase.invoiceNumber,
+        supplierId: row.supplier.id,
+        supplier: row.supplier.businessName ?? row.supplier.name,
+        products: row.items
+          .map((item) => `${item.product.name} (${item.quantityBase})`)
+          .join(", "),
+        quantityBase: row.items.reduce(
+          (sum, item) => sum + item.quantityBase,
+          0,
+        ),
+        method: row.method,
+        reason: row.reason,
+        total: minorToMoney(totalMinor),
+        user: row.createdBy.displayName,
+        totalMinor,
+      };
+    });
+    return {
+      summary: {
+        totalRecords: result.length,
+        returnValue: minorToMoney(
+          result.reduce((sum, row) => sum + row.totalMinor, 0),
+        ),
+      },
+      rows: result.map(({ totalMinor: _totalMinor, ...row }) => row),
+    };
   }
 
-  async payments(filter: ReportDateFilter) { const rows = await this.db.payment.findMany({ where: { status: "POSTED", paidAt: range(filter.from, filter.to), ...(filter.customerId ? { customerId: filter.customerId } : {}), ...(filter.supplierId ? { supplierId: filter.supplierId } : {}), ...(filter.userId ? { createdById: filter.userId } : {}), ...(filter.paymentMethod ? { method: filter.paymentMethod } : {}) }, include: { customer: { select: { id: true, name: true, businessName: true } }, supplier: { select: { id: true, name: true, businessName: true } }, sale: { select: { invoiceNumber: true } }, purchase: { select: { invoiceNumber: true } }, createdBy: { select: { displayName: true } } }, orderBy: { paidAt: "desc" } }); const result = rows.map((row) => ({ id: row.id, date: dayKey(row.paidAt), receiptNumber: row.receiptNumber, direction: row.direction, partyType: row.partyType, partyId: row.customer?.id ?? row.supplier?.id ?? null, party: row.customer?.businessName ?? row.customer?.name ?? row.supplier?.businessName ?? row.supplier?.name ?? "—", document: row.sale?.invoiceNumber ?? row.purchase?.invoiceNumber ?? "—", method: row.method, reference: row.reference, amount: minorToMoney(row.amountMinor), user: row.createdBy.displayName })); return { summary: { totalRecords: result.length, totalPayments: minorToMoney(rows.reduce((sum, row) => sum + row.amountMinor, 0)), received: minorToMoney(rows.filter((row) => row.direction === "IN").reduce((sum, row) => sum + row.amountMinor, 0)), paid: minorToMoney(rows.filter((row) => row.direction === "OUT").reduce((sum, row) => sum + row.amountMinor, 0)) }, rows: result, customerPayments: result.filter((row) => row.partyType === "CUSTOMER"), supplierPayments: result.filter((row) => row.partyType === "SUPPLIER") };
+  async stockMovements(filter: ReportDateFilter) {
+    const rows = await this.db.stockMovement.findMany({
+      where: {
+        createdAt: range(filter.from, filter.to),
+        ...(filter.productId ? { productId: filter.productId } : {}),
+        ...(filter.userId ? { createdById: filter.userId } : {}),
+        ...(filter.categoryId || filter.brandId
+          ? {
+              product: {
+                ...(filter.categoryId ? { categoryId: filter.categoryId } : {}),
+                ...(filter.brandId ? { brandId: filter.brandId } : {}),
+              },
+            }
+          : {}),
+      },
+      include: {
+        product: {
+          select: {
+            id: true,
+            name: true,
+            sku: true,
+            category: { select: { name: true } },
+            brand: { select: { name: true } },
+          },
+        },
+        batch: { select: { batchNumber: true } },
+        createdBy: { select: { displayName: true } },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+    const result = rows.map((row) => ({
+      id: row.id,
+      date: dayKey(row.createdAt),
+      productId: row.product.id,
+      product: row.product.name,
+      sku: row.product.sku,
+      category: row.product.category?.name ?? null,
+      brand: row.product.brand?.name ?? null,
+      batch: row.batch?.batchNumber ?? null,
+      type: row.movementType,
+      quantityBase: row.quantityBase,
+      balanceAfterBase: row.balanceAfterBase,
+      unitCost: minorToMoney(row.unitCostMinor),
+      value: minorToMoney(row.valueMinor),
+      source: row.sourceType,
+      reference: row.sourceId,
+      user: row.createdBy.displayName,
+    }));
+    return {
+      summary: {
+        totalRecords: result.length,
+        inboundQuantity: rows
+          .filter((row) => row.quantityBase > 0)
+          .reduce((sum, row) => sum + row.quantityBase, 0),
+        outboundQuantity: Math.abs(
+          rows
+            .filter((row) => row.quantityBase < 0)
+            .reduce((sum, row) => sum + row.quantityBase, 0),
+        ),
+        movementValue: minorToMoney(
+          rows.reduce((sum, row) => sum + Math.abs(row.valueMinor), 0),
+        ),
+      },
+      rows: result,
+      adjustments: result.filter((row) =>
+        [
+          "ADJUSTMENT_IN",
+          "ADJUSTMENT_OUT",
+          "STOCK_COUNT_IN",
+          "STOCK_COUNT_OUT",
+        ].includes(row.type),
+      ),
+    };
   }
 
-  async financialSummary(filter: ReportDateFilter) { const [sales, purchases, salesReturns, purchaseReturns, expenses, inventory, customerLedger, supplierLedger] = await Promise.all([this.db.sale.aggregate({ where: { status: "POSTED", soldAt: range(filter.from, filter.to) }, _sum: { totalMinor: true, subtotalMinor: true, taxMinor: true, discountMinor: true, paidMinor: true } }), this.db.purchase.aggregate({ where: { status: "POSTED", purchasedAt: range(filter.from, filter.to) }, _sum: { totalMinor: true, subtotalMinor: true, taxMinor: true, discountMinor: true, paidMinor: true } }), this.db.salesReturn.aggregate({ where: { status: "POSTED", returnedAt: range(filter.from, filter.to) }, _sum: { returnTotalMinor: true, refundMinor: true } }), this.db.purchaseReturn.aggregate({ where: { status: "POSTED", returnedAt: range(filter.from, filter.to) }, _sum: { totalMinor: true, taxMinor: true } }), this.db.expense.aggregate({ where: { status: "POSTED", incurredAt: range(filter.from, filter.to) }, _sum: { amountMinor: true } }), this.db.product.aggregate({ where: { deletedAt: null, isActive: true }, _sum: { inventoryValueMinor: true } }), this.db.customerLedger.aggregate({ where: { occurredAt: { lte: pakistanDay(filter.to).end } }, _sum: { debitMinor: true, creditMinor: true } }), this.db.supplierLedger.aggregate({ where: { occurredAt: { lte: pakistanDay(filter.to).end } }, _sum: { debitMinor: true, creditMinor: true } })]); const sale = sales._sum, purchase = purchases._sum, saleReturns = salesReturns._sum.returnTotalMinor ?? 0, purchaseReturn = purchaseReturns._sum.totalMinor ?? 0, expense = expenses._sum.amountMinor ?? 0; const rows = [{ metric: "Gross sales", amount: minorToMoney(sale.totalMinor ?? 0) }, { metric: "Sales returns", amount: minorToMoney(saleReturns) }, { metric: "Sales tax", amount: minorToMoney(sale.taxMinor ?? 0) }, { metric: "Sales discount", amount: minorToMoney(sale.discountMinor ?? 0) }, { metric: "Gross purchases", amount: minorToMoney(purchase.totalMinor ?? 0) }, { metric: "Purchase returns", amount: minorToMoney(purchaseReturn) }, { metric: "Purchase tax", amount: minorToMoney(purchase.taxMinor ?? 0) }, { metric: "Purchase discount", amount: minorToMoney(purchase.discountMinor ?? 0) }, { metric: "Operating expenses", amount: minorToMoney(expense) }, { metric: "Inventory value", amount: minorToMoney(inventory._sum.inventoryValueMinor ?? 0) }]; const receivablesMinor = Math.max(0, (customerLedger._sum.debitMinor ?? 0) - (customerLedger._sum.creditMinor ?? 0)); const payablesMinor = Math.max(0, (supplierLedger._sum.creditMinor ?? 0) - (supplierLedger._sum.debitMinor ?? 0)); return { summary: { totalRevenue: minorToMoney((sale.totalMinor ?? 0) - saleReturns), totalPurchases: minorToMoney((purchase.totalMinor ?? 0) - purchaseReturn), totalExpenses: minorToMoney(expense), totalTax: minorToMoney((sale.taxMinor ?? 0) + (purchase.taxMinor ?? 0) - (purchaseReturns._sum.taxMinor ?? 0)), totalDiscount: minorToMoney((sale.discountMinor ?? 0) + (purchase.discountMinor ?? 0)), outstandingReceivables: minorToMoney(receivablesMinor), outstandingPayables: minorToMoney(payablesMinor), inventoryValue: minorToMoney(inventory._sum.inventoryValueMinor ?? 0) }, rows };
+  async inventoryValuation(filter: InventoryReportFilter) {
+    const products = await this.db.product.findMany({
+      where: {
+        deletedAt: null,
+        isActive: true,
+        ...(filter.productId ? { id: filter.productId } : {}),
+        ...(filter.categoryId ? { categoryId: filter.categoryId } : {}),
+        ...(filter.brandId ? { brandId: filter.brandId } : {}),
+      },
+      include: {
+        category: { select: { name: true } },
+        brand: { select: { name: true } },
+        baseUnit: { select: { symbol: true } },
+      },
+      orderBy: { name: "asc" },
+    });
+    const rows = products.map((product) => ({
+      productId: product.id,
+      product: product.name,
+      sku: product.sku,
+      category: product.category?.name ?? null,
+      brand: product.brand?.name ?? null,
+      unit: product.baseUnit.symbol,
+      stockBaseQty: product.stockOnHandBaseQty,
+      averageCost: minorToMoney(product.averageCostMinor),
+      inventoryValue: minorToMoney(product.inventoryValueMinor),
+      status:
+        product.stockOnHandBaseQty <= 0
+          ? "OUT_OF_STOCK"
+          : product.stockOnHandBaseQty <= product.reorderLevelBaseQty
+            ? "LOW_STOCK"
+            : "IN_STOCK",
+    }));
+    return {
+      summary: {
+        totalRecords: rows.length,
+        inventoryValue: minorToMoney(
+          products.reduce((sum, row) => sum + row.inventoryValueMinor, 0),
+        ),
+        lowStock: rows.filter((row) => row.status === "LOW_STOCK").length,
+        outOfStock: rows.filter((row) => row.status === "OUT_OF_STOCK").length,
+      },
+      rows,
+      lowStock: rows.filter((row) => row.status === "LOW_STOCK"),
+      outOfStock: rows.filter((row) => row.status === "OUT_OF_STOCK"),
+    };
   }
 
-  async audit(filter: AuditReportFilter) { const [logs, logins] = await Promise.all([this.db.auditLog.findMany({ where: { createdAt: range(filter.from, filter.to), ...(filter.userId ? { userId: filter.userId } : {}), ...(filter.action ? { action: filter.action } : {}), ...(filter.entityType ? { entityType: { contains: filter.entityType } } : {}) }, include: { user: { select: { id: true, displayName: true, username: true } } }, orderBy: { createdAt: "desc" }, take: 5000 }), this.db.loginHistory.findMany({ where: { createdAt: range(filter.from, filter.to), ...(filter.userId ? { userId: filter.userId } : {}) }, include: { user: { select: { displayName: true } } }, orderBy: { createdAt: "desc" }, take: 5000 })]); return { summary: { totalRecords: logs.length, logins: logins.length, failedLogins: logins.filter((row) => !row.success).length, deletedRecords: logs.filter((row) => row.action === "SOFT_DELETE").length }, logs: logs.map((row) => ({ id: row.id, date: row.createdAt.toISOString(), user: row.user?.displayName ?? "System", username: row.user?.username ?? null, action: row.action, entityType: row.entityType, entityId: row.entityId, before: row.beforeJson, after: row.afterJson })), logins: logins.map((row) => ({ id: row.id, date: row.createdAt.toISOString(), username: row.username, user: row.user?.displayName ?? null, success: row.success, reason: row.reason, ipAddress: row.ipAddress })), deleted: logs.filter((row) => row.action === "SOFT_DELETE").map((row) => ({ id: row.id, date: row.createdAt.toISOString(), user: row.user?.displayName ?? "System", entityType: row.entityType, entityId: row.entityId, before: row.beforeJson })) };
+  async payments(filter: ReportDateFilter) {
+    const rows = await this.db.payment.findMany({
+      where: {
+        status: "POSTED",
+        paidAt: range(filter.from, filter.to),
+        ...(filter.customerId ? { customerId: filter.customerId } : {}),
+        ...(filter.supplierId ? { supplierId: filter.supplierId } : {}),
+        ...(filter.userId ? { createdById: filter.userId } : {}),
+        ...(filter.paymentMethod ? { method: filter.paymentMethod } : {}),
+      },
+      include: {
+        customer: { select: { id: true, name: true, businessName: true } },
+        supplier: { select: { id: true, name: true, businessName: true } },
+        sale: { select: { invoiceNumber: true } },
+        purchase: { select: { invoiceNumber: true } },
+        createdBy: { select: { displayName: true } },
+      },
+      orderBy: { paidAt: "desc" },
+    });
+    const result = rows.map((row) => ({
+      id: row.id,
+      date: dayKey(row.paidAt),
+      receiptNumber: row.receiptNumber,
+      direction: row.direction,
+      partyType: row.partyType,
+      partyId: row.customer?.id ?? row.supplier?.id ?? null,
+      party:
+        row.customer?.businessName ??
+        row.customer?.name ??
+        row.supplier?.businessName ??
+        row.supplier?.name ??
+        "—",
+      document: row.sale?.invoiceNumber ?? row.purchase?.invoiceNumber ?? "—",
+      method: row.method,
+      reference: row.reference,
+      amount: minorToMoney(row.amountMinor),
+      user: row.createdBy.displayName,
+    }));
+    return {
+      summary: {
+        totalRecords: result.length,
+        totalPayments: minorToMoney(
+          rows.reduce((sum, row) => sum + row.amountMinor, 0),
+        ),
+        received: minorToMoney(
+          rows
+            .filter((row) => row.direction === "IN")
+            .reduce((sum, row) => sum + row.amountMinor, 0),
+        ),
+        paid: minorToMoney(
+          rows
+            .filter((row) => row.direction === "OUT")
+            .reduce((sum, row) => sum + row.amountMinor, 0),
+        ),
+      },
+      rows: result,
+      customerPayments: result.filter((row) => row.partyType === "CUSTOMER"),
+      supplierPayments: result.filter((row) => row.partyType === "SUPPLIER"),
+    };
+  }
+
+  async financialSummary(filter: ReportDateFilter) {
+    const [
+      sales,
+      purchases,
+      salesReturns,
+      purchaseReturns,
+      expenses,
+      inventory,
+      customerLedger,
+      supplierLedger,
+    ] = await Promise.all([
+      this.db.sale.aggregate({
+        where: { status: "POSTED", soldAt: range(filter.from, filter.to) },
+        _sum: {
+          totalMinor: true,
+          subtotalMinor: true,
+          taxMinor: true,
+          discountMinor: true,
+          paidMinor: true,
+        },
+      }),
+      this.db.purchase.aggregate({
+        where: { status: "POSTED", purchasedAt: range(filter.from, filter.to) },
+        _sum: {
+          totalMinor: true,
+          subtotalMinor: true,
+          taxMinor: true,
+          discountMinor: true,
+          paidMinor: true,
+        },
+      }),
+      this.db.salesReturn.aggregate({
+        where: { status: "POSTED", returnedAt: range(filter.from, filter.to) },
+        _sum: { returnTotalMinor: true, refundMinor: true },
+      }),
+      this.db.purchaseReturn.aggregate({
+        where: { status: "POSTED", returnedAt: range(filter.from, filter.to) },
+        _sum: { totalMinor: true, taxMinor: true },
+      }),
+      this.db.expense.aggregate({
+        where: { status: "POSTED", incurredAt: range(filter.from, filter.to) },
+        _sum: { amountMinor: true },
+      }),
+      this.db.product.aggregate({
+        where: { deletedAt: null, isActive: true },
+        _sum: { inventoryValueMinor: true },
+      }),
+      this.db.customerLedger.aggregate({
+        where: { occurredAt: { lte: pakistanDay(filter.to).end } },
+        _sum: { debitMinor: true, creditMinor: true },
+      }),
+      this.db.supplierLedger.aggregate({
+        where: { occurredAt: { lte: pakistanDay(filter.to).end } },
+        _sum: { debitMinor: true, creditMinor: true },
+      }),
+    ]);
+    const sale = sales._sum,
+      purchase = purchases._sum,
+      saleReturns = salesReturns._sum.returnTotalMinor ?? 0,
+      purchaseReturn = purchaseReturns._sum.totalMinor ?? 0,
+      expense = expenses._sum.amountMinor ?? 0;
+    const rows = [
+      { metric: "Gross sales", amount: minorToMoney(sale.totalMinor ?? 0) },
+      { metric: "Sales returns", amount: minorToMoney(saleReturns) },
+      { metric: "Sales tax", amount: minorToMoney(sale.taxMinor ?? 0) },
+      {
+        metric: "Sales discount",
+        amount: minorToMoney(sale.discountMinor ?? 0),
+      },
+      {
+        metric: "Gross purchases",
+        amount: minorToMoney(purchase.totalMinor ?? 0),
+      },
+      { metric: "Purchase returns", amount: minorToMoney(purchaseReturn) },
+      { metric: "Purchase tax", amount: minorToMoney(purchase.taxMinor ?? 0) },
+      {
+        metric: "Purchase discount",
+        amount: minorToMoney(purchase.discountMinor ?? 0),
+      },
+      { metric: "Operating expenses", amount: minorToMoney(expense) },
+      {
+        metric: "Inventory value",
+        amount: minorToMoney(inventory._sum.inventoryValueMinor ?? 0),
+      },
+    ];
+    const receivablesMinor = Math.max(
+      0,
+      (customerLedger._sum.debitMinor ?? 0) -
+        (customerLedger._sum.creditMinor ?? 0),
+    );
+    const payablesMinor = Math.max(
+      0,
+      (supplierLedger._sum.creditMinor ?? 0) -
+        (supplierLedger._sum.debitMinor ?? 0),
+    );
+    return {
+      summary: {
+        totalRevenue: minorToMoney((sale.totalMinor ?? 0) - saleReturns),
+        totalPurchases: minorToMoney(
+          (purchase.totalMinor ?? 0) - purchaseReturn,
+        ),
+        totalExpenses: minorToMoney(expense),
+        totalTax: minorToMoney(
+          (sale.taxMinor ?? 0) +
+            (purchase.taxMinor ?? 0) -
+            (purchaseReturns._sum.taxMinor ?? 0),
+        ),
+        totalDiscount: minorToMoney(
+          (sale.discountMinor ?? 0) + (purchase.discountMinor ?? 0),
+        ),
+        outstandingReceivables: minorToMoney(receivablesMinor),
+        outstandingPayables: minorToMoney(payablesMinor),
+        inventoryValue: minorToMoney(inventory._sum.inventoryValueMinor ?? 0),
+      },
+      rows,
+    };
+  }
+
+  async audit(filter: AuditReportFilter) {
+    const [logs, logins] = await Promise.all([
+      this.db.auditLog.findMany({
+        where: {
+          createdAt: range(filter.from, filter.to),
+          ...(filter.userId ? { userId: filter.userId } : {}),
+          ...(filter.action ? { action: filter.action } : {}),
+          ...(filter.entityType
+            ? { entityType: { contains: filter.entityType } }
+            : {}),
+        },
+        include: {
+          user: { select: { id: true, displayName: true, username: true } },
+        },
+        orderBy: { createdAt: "desc" },
+        take: 5000,
+      }),
+      this.db.loginHistory.findMany({
+        where: {
+          createdAt: range(filter.from, filter.to),
+          ...(filter.userId ? { userId: filter.userId } : {}),
+        },
+        include: { user: { select: { displayName: true } } },
+        orderBy: { createdAt: "desc" },
+        take: 5000,
+      }),
+    ]);
+    return {
+      summary: {
+        totalRecords: logs.length,
+        logins: logins.length,
+        failedLogins: logins.filter((row) => !row.success).length,
+        deletedRecords: logs.filter((row) => row.action === "SOFT_DELETE")
+          .length,
+      },
+      logs: logs.map((row) => ({
+        id: row.id,
+        date: iso(row.createdAt),
+        user: row.user?.displayName ?? "System",
+        username: row.user?.username ?? null,
+        action: row.action,
+        entityType: row.entityType,
+        entityId: row.entityId,
+        before: row.beforeJson,
+        after: row.afterJson,
+      })),
+      logins: logins.map((row) => ({
+        id: row.id,
+        date: iso(row.createdAt),
+        username: row.username,
+        user: row.user?.displayName ?? null,
+        success: row.success,
+        reason: row.reason,
+        ipAddress: row.ipAddress,
+      })),
+      deleted: logs
+        .filter((row) => row.action === "SOFT_DELETE")
+        .map((row) => ({
+          id: row.id,
+          date: iso(row.createdAt),
+          user: row.user?.displayName ?? "System",
+          entityType: row.entityType,
+          entityId: row.entityId,
+          before: row.beforeJson,
+        })),
+    };
   }
 }
 
-function moneyRow<T extends Record<string, unknown>>(row: T) { const result: Record<string, unknown> = { ...row }; for (const [key, value] of Object.entries(row)) if (key.endsWith("Minor") && typeof value === "number") result[key.slice(0, -5)] = minorToMoney(value); return result as T & Record<string, unknown>; }
+function moneyRow<T extends Record<string, unknown>>(row: T) {
+  const result: Record<string, unknown> = { ...row };
+  for (const [key, value] of Object.entries(row))
+    if (key.endsWith("Minor") && typeof value === "number")
+      result[key.slice(0, -5)] = minorToMoney(value);
+  return result as T & Record<string, unknown>;
+}

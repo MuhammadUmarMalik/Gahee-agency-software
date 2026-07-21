@@ -20,6 +20,7 @@ const PurchasesPage = lazy(() => import("@/pages/purchases-page").then((module) 
 const PurchaseFormPage = lazy(() => import("@/pages/purchase-form-page").then((module) => ({ default: module.PurchaseFormPage })));
 const PurchaseDetailPage = lazy(() => import("@/pages/purchase-detail-page").then((module) => ({ default: module.PurchaseDetailPage })));
 const PosPage = lazy(() => import("@/pages/pos-page").then((module) => ({ default: module.PosPage })));
+const SalesPage = lazy(() => import("@/pages/sales-page").then((module) => ({ default: module.SalesPage })));
 const SaleDetailPage = lazy(() => import("@/pages/sale-detail-page").then((module) => ({ default: module.SaleDetailPage })));
 const CustomersPage = lazy(() => import("@/pages/customers-page").then((module) => ({ default: module.CustomersPage })));
 const CustomerFormPage = lazy(() => import("@/pages/customer-form-page").then((module) => ({ default: module.CustomerFormPage })));
@@ -36,16 +37,19 @@ const ReportsPage = lazy(() => import("@/pages/reports-page").then((module) => (
 const SettingsPage = lazy(() => import("@/pages/settings-page").then((module) => ({ default: module.SettingsPage })));
 const AccountingPage = lazy(() => import("@/pages/accounting-page").then((module) => ({ default: module.AccountingPage })));
 const PurchaseReturnsPage = lazy(() => import("@/pages/purchase-returns-page").then((module) => ({ default: module.PurchaseReturnsPage })));
+const FbrQueuePage = lazy(() => import("@/pages/fbr-queue-page").then((module) => ({ default: module.FbrQueuePage })));
 
 const router = createBrowserRouter([{ path: "/", element: <ProtectedRoute><AppLayout/></ProtectedRoute>, children: [
   { index: true, element: <HomePage/> },
   { path: "pos", element: <ProtectedRoute permission={PERMISSIONS.POS_USE}><PosPage/></ProtectedRoute> },
+  { path: "sales", element: <ProtectedRoute permission={PERMISSIONS.SALES_VIEW}><SalesPage/></ProtectedRoute> },
   { path: "sales/:id", element: <ProtectedRoute permission={PERMISSIONS.SALES_VIEW}><SaleDetailPage/></ProtectedRoute> },
   { path: "sales-returns", element: <ProtectedRoute permission={PERMISSIONS.SALES_RETURN}><SalesReturnPage/></ProtectedRoute> },
   { path: "cashbook", element: <ProtectedRoute permission={PERMISSIONS.CASHBOOK_VIEW}><CashbookPage/></ProtectedRoute> },
   { path: "expenses", element: <ProtectedRoute permission={PERMISSIONS.CASHBOOK_VIEW}><ExpensesPage/></ProtectedRoute> },
   { path: "reports", element: <ProtectedRoute permission={PERMISSIONS.REPORTS_BASIC}><ReportsPage/></ProtectedRoute> },
   { path: "accounting", element: <ProtectedRoute permission={PERMISSIONS.ACCOUNTING_VIEW}><AccountingPage/></ProtectedRoute> },
+  { path: "fbr-queue", element: <ProtectedRoute permission={PERMISSIONS.SETTINGS_MANAGE}><FbrQueuePage/></ProtectedRoute> },
   { path: "products", element: <ProtectedRoute permission={PERMISSIONS.PRODUCTS_MANAGE}><ProductsPage/></ProtectedRoute> },
   { path: "products/new", element: <ProtectedRoute permission={PERMISSIONS.PRODUCTS_MANAGE}><ProductFormPage/></ProtectedRoute> },
   { path: "products/:id/edit", element: <ProtectedRoute permission={PERMISSIONS.PRODUCTS_MANAGE}><ProductFormPage/></ProtectedRoute> },

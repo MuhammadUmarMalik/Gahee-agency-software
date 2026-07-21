@@ -2,19 +2,21 @@ import { execFileSync } from "node:child_process";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
-import { PrismaClient } from "@prisma/client";
+import type { AppDbClient } from "../../lib/db.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AccountingPostingService } from "./posting.service.js";
 import { AccountingService } from "./accounting.service.js";
 
 describe("accounting database integration", () => {
-  let directory = "", databaseUrl = "", db: PrismaClient, userId = "";
+  let directory = "", databaseUrl = "", db: AppDbClient, userId = "";
   beforeAll(async () => {
     directory = await mkdtemp(resolve(tmpdir(), "oil-agency-accounting-"));
     databaseUrl = `file:${resolve(directory, "accounting.db").replaceAll("\\", "/")}`;
-    const executable = process.platform === "win32" ? "npx.cmd" : "npx";
-    execFileSync(executable, ["prisma", "db", "push", "--schema", resolve(process.cwd(), "../../prisma/schema.prisma"), "--skip-generate"], { cwd: resolve(process.cwd(), "../.."), env: { ...process.env, DATABASE_URL: databaseUrl }, stdio: "pipe" });
-    db = new PrismaClient({ datasourceUrl: databaseUrl });
+    const repositoryRoot = resolve(process.cwd(), "../..");
+    const drizzleKit = resolve(repositoryRoot, "node_modules/drizzle-kit/bin.cjs");
+    execFileSync(process.execPath, [drizzleKit, "migrate", "--config", resolve(repositoryRoot, "drizzle.config.ts")], { cwd: repositoryRoot, env: { ...process.env, DATABASE_URL: databaseUrl }, stdio: "pipe" });
+    process.env.DATABASE_URL = databaseUrl;
+    db = (await import("../../lib/db.js")).db;
     const role = await db.role.create({ data: { code: "OWNER", name: "Owner" } });
     const user = await db.user.create({ data: { username: "integration-owner", displayName: "Integration Owner", passwordHash: "not-used", roleId: role.id } }); userId = user.id;
   }, 30_000);

@@ -1,4 +1,4 @@
-import { Prisma, type PrismaClient } from "@prisma/client";
+import type { AppDbClient, TransactionClient, PaymentMethod, SourceType, StockMovementType, BackupKind, JobType, JobStatus, CashDirection, CashbookEntryType, ReturnCondition } from "../../lib/db.js";
 import type { PurchaseReturnInput } from "@oil-agency/shared";
 import { HttpError } from "../../lib/http-error.js";
 import { applyStockMovement } from "../inventory/stock-engine.js";
@@ -7,24 +7,24 @@ import { minorToMoney } from "../products/product.service.js";
 
 const ref = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
 const atNoon = (value: string) => new Date(`${value}T12:00:00.000Z`);
-const include = { purchase: { select: { invoiceNumber: true, supplierInvoice: true, purchasedAt: true } }, supplier: { select: { id: true, code: true, name: true } }, createdBy: { select: { displayName: true } }, items: { include: { product: { select: { name: true, sku: true } }, batch: { select: { batchNumber: true } }, purchaseItem: { select: { packingName: true, unitsPerPack: true } } } } } satisfies Prisma.PurchaseReturnInclude;
+const include = { purchase: { select: { invoiceNumber: true, supplierInvoice: true, purchasedAt: true } }, supplier: { select: { id: true, code: true, name: true } }, createdBy: { select: { displayName: true } }, items: { include: { product: { select: { name: true, sku: true } }, batch: { select: { batchNumber: true } }, purchaseItem: { select: { packingName: true, unitsPerPack: true } } } } } satisfies Record<string, unknown>;
 
 export class PurchaseReturnService {
-  constructor(private readonly db: PrismaClient) {}
+  constructor(private readonly db: AppDbClient) {}
   async original(id: string) {
-    const purchase = await this.db.purchase.findFirst({ where: { id, status: "POSTED" }, include: { supplier: true, items: { include: { product: { include: { baseUnit: true } }, batch: true, returnItems: { where: { purchaseReturn: { status: "POSTED" } }, select: { quantityBase: true } } } } } });
+    const purchase = await this.db.purchase.findFirst({ where: { id, status: "POSTED" }, include: { supplier: true, items: { include: { product: { include: { baseUnit: true } }, batch: true, returns: { where: { purchaseReturn: { status: "POSTED" } }, select: { quantityBase: true } } } } } });
     if (!purchase) throw new HttpError(404, "PURCHASE_NOT_FOUND", "Posted purchase was not found.");
-    return { ...purchase, total: minorToMoney(purchase.totalMinor), items: purchase.items.map((item) => { const returned = item.returnItems.reduce((sum, row) => sum + row.quantityBase, 0); return { id: item.id, productId: item.productId, productName: item.product.name, sku: item.product.sku, batchNumber: item.batch?.batchNumber ?? null, quantityBase: item.quantityBase, returnedQuantityBase: returned, remainingQuantityBase: item.quantityBase - returned, unitCost: minorToMoney(item.unitCostMinor), baseUnit: item.product.baseUnit.symbol }; }).filter((item) => item.remainingQuantityBase > 0) };
+    return { ...purchase, total: minorToMoney(purchase.totalMinor), items: purchase.items.map((item) => { const returned = item.returns.reduce((sum, row) => sum + row.quantityBase, 0); return { id: item.id, productId: item.productId, productName: item.product.name, sku: item.product.sku, batchNumber: item.batch?.batchNumber ?? null, quantityBase: item.quantityBase, returnedQuantityBase: returned, remainingQuantityBase: item.quantityBase - returned, unitCost: minorToMoney(item.unitCostMinor), baseUnit: item.product.baseUnit.symbol }; }).filter((item) => item.remainingQuantityBase > 0) };
   }
   async list() { return this.db.purchaseReturn.findMany({ include, orderBy: { returnedAt: "desc" }, take: 200 }); }
   async get(id: string) { const row = await this.db.purchaseReturn.findUnique({ where: { id }, include }); if (!row) throw new HttpError(404, "PURCHASE_RETURN_NOT_FOUND", "Purchase return was not found."); return dto(row); }
   async create(input: PurchaseReturnInput, userId: string) {
     return this.db.$transaction(async (tx) => {
-      const purchase = await tx.purchase.findFirst({ where: { id: input.purchaseId, status: "POSTED" }, include: { items: { include: { product: true, returnItems: { where: { purchaseReturn: { status: "POSTED" } }, select: { quantityBase: true } } } } } });
+      const purchase = await tx.purchase.findFirst({ where: { id: input.purchaseId, status: "POSTED" }, include: { items: { include: { product: true, returns: { where: { purchaseReturn: { status: "POSTED" } }, select: { quantityBase: true } } } } } });
       if (!purchase) throw new HttpError(404, "PURCHASE_NOT_FOUND", "Posted purchase was not found.");
       const byId = new Map(purchase.items.map((item) => [item.id, item])), seen = new Set<string>();
       let subtotalMinor = 0;
-      const prepared = input.items.map((row) => { if (seen.has(row.purchaseItemId)) throw new HttpError(400, "DUPLICATE_RETURN_LINE", "Combine duplicate return lines."); seen.add(row.purchaseItemId); const item = byId.get(row.purchaseItemId); if (!item) throw new HttpError(400, "INVALID_PURCHASE_ITEM", "A selected item is not on the original purchase."); const returned = item.returnItems.reduce((sum, value) => sum + value.quantityBase, 0); if (row.quantityBase > item.quantityBase - returned) throw new HttpError(409, "RETURN_QUANTITY_EXCEEDED", `Only ${Math.max(0, item.quantityBase - returned)} unit(s) remain returnable for ${item.product.name}.`); const unitCostMinor = item.product.averageCostMinor || item.unitCostMinor; const lineTotalMinor = unitCostMinor * row.quantityBase; subtotalMinor += lineTotalMinor; return { row, item, unitCostMinor, lineTotalMinor }; });
+      const prepared = input.items.map((row) => { if (seen.has(row.purchaseItemId)) throw new HttpError(400, "DUPLICATE_RETURN_LINE", "Combine duplicate return lines."); seen.add(row.purchaseItemId); const item = byId.get(row.purchaseItemId); if (!item) throw new HttpError(400, "INVALID_PURCHASE_ITEM", "A selected item is not on the original purchase."); const returned = item.returns.reduce((sum, value) => sum + value.quantityBase, 0); if (row.quantityBase > item.quantityBase - returned) throw new HttpError(409, "RETURN_QUANTITY_EXCEEDED", `Only ${Math.max(0, item.quantityBase - returned)} unit(s) remain returnable for ${item.product.name}.`); const unitCostMinor = item.product.averageCostMinor || item.unitCostMinor; const lineTotalMinor = unitCostMinor * row.quantityBase; subtotalMinor += lineTotalMinor; return { row, item, unitCostMinor, lineTotalMinor }; });
       const returnedAt = atNoon(input.returnedOn), taxMinor = purchase.subtotalMinor > 0 ? Math.round(purchase.taxMinor * subtotalMinor / purchase.subtotalMinor) : 0, totalMinor = subtotalMinor + taxMinor;
       if (input.method === "CASH") await AccountingPostingService.assertCashDayOpen(tx, returnedAt);
       const purchaseReturn = await tx.purchaseReturn.create({ data: { returnNumber: ref("PRT"), purchaseId: purchase.id, supplierId: purchase.supplierId, method: input.method, subtotalMinor, taxMinor, totalMinor, reason: input.reason, returnedAt, createdById: userId } });
@@ -47,5 +47,15 @@ export class PurchaseReturnService {
     });
   }
 }
-type ReturnRecord = Prisma.PurchaseReturnGetPayload<{ include: typeof include }>;
+type ReturnRecord = {
+  subtotalMinor: number;
+  taxMinor: number;
+  totalMinor: number;
+  items: Array<{
+    unitCostMinor: number;
+    lineTotalMinor: number;
+    [key: string]: unknown;
+  }>;
+  [key: string]: unknown;
+};
 function dto(row: ReturnRecord) { return { ...row, subtotal: minorToMoney(row.subtotalMinor), tax: minorToMoney(row.taxMinor), total: minorToMoney(row.totalMinor), items: row.items.map((item) => ({ ...item, unitCost: minorToMoney(item.unitCostMinor), lineTotal: minorToMoney(item.lineTotalMinor) })) }; }

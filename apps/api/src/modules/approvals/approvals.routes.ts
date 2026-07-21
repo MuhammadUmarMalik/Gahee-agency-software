@@ -1,11 +1,11 @@
 import { randomBytes } from "node:crypto";
-import argon2 from "argon2";
-import type { PrismaClient } from "@prisma/client";
+import type { AppDbClient } from "../../lib/db.js";
 import { Router } from "express";
 import { rateLimit } from "express-rate-limit";
 import { ownerPinSchema, PERMISSIONS } from "@oil-agency/shared";
 import { z } from "zod";
 import { HttpError } from "../../lib/http-error.js";
+import { verifySecret } from "../../lib/password.js";
 import { hashToken } from "../../lib/security.js";
 import { authenticate } from "../../middleware/authenticate.js";
 import { requirePermission } from "../../middleware/require-permission.js";
@@ -15,7 +15,7 @@ const approvalSchema = z.object({
   discountBps: z.number().int().min(1).max(10_000),
 });
 
-export function createApprovalsRouter(db: PrismaClient): Router {
+export function createApprovalsRouter(db: AppDbClient): Router {
   const router = Router();
   router.use(authenticate(db), requirePermission(PERMISSIONS.POS_USE));
   const pinLimiter = rateLimit({
@@ -30,7 +30,7 @@ export function createApprovalsRouter(db: PrismaClient): Router {
     const owners = await db.user.findMany({ where: { isActive: true, deletedAt: null, role: { code: "OWNER" }, ownerPinHash: { not: null } } });
     let owner: (typeof owners)[number] | undefined;
     for (const candidate of owners) {
-      if (candidate.ownerPinHash && await argon2.verify(candidate.ownerPinHash, input.ownerPin)) { owner = candidate; break; }
+      if (candidate.ownerPinHash && await verifySecret(candidate.ownerPinHash, input.ownerPin)) { owner = candidate; break; }
     }
     if (!owner) throw new HttpError(401, "INVALID_OWNER_PIN", "Owner PIN is incorrect.");
     const token = randomBytes(24).toString("base64url");

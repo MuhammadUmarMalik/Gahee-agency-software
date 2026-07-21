@@ -3,26 +3,51 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "workspaces": ["apps/*", "packages/*"],
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
-    "postinstall": "prisma generate && npm run build -w @oil-agency/shared",
+    "postinstall": "npm run build -w @oil-agency/shared && npm run native:node",
     "dev": "npm run dev:desktop",
     "dev:api": "npm run dev -w @oil-agency/api",
     "dev:desktop": "npm run dev -w @oil-agency/desktop",
-    "build": "npm run build -ws --if-present",
+    "native:node": "node scripts/ensure-better-sqlite3-node.cjs",
+    "native:electron": "npm run native:electron -w @oil-agency/desktop",
+    "build": "npm run build:workspaces",
+    "build:workspaces": "npm run build -ws --if-present",
+    "package:desktop": "npm run package -w @oil-agency/desktop",
+    "dist:desktop": "npm run dist -w @oil-agency/desktop",
+    "lint": "npm run lint -ws --if-present",
     "typecheck": "npm run typecheck -ws --if-present",
+    "pretest": "npm run native:node",
     "test": "npm run test -ws --if-present",
-    "db:generate": "prisma generate",
-    "db:ensure": "cross-env DATABASE_URL=file:./data/agency.db prisma db push --skip-generate",
-    "db:migrate": "prisma migrate dev",
-    "db:migrate:deploy": "prisma migrate deploy",
-    "db:seed": "tsx prisma/seed.ts"
+    "predev:api": "npm run native:node",
+    "predb:generate": "npm run native:node",
+    "db:generate": "drizzle-kit generate",
+    "db:push": "npm run db:migrate",
+    "predb:ensure": "npm run native:node",
+    "db:ensure": "cross-env DATABASE_URL=file:./data/agency.db drizzle-kit migrate",
+    "predb:migrate": "npm run native:node",
+    "db:migrate": "drizzle-kit migrate",
+    "predb:migrate:deploy": "npm run native:node",
+    "db:migrate:deploy": "drizzle-kit migrate",
+    "predb:seed": "npm run native:node",
+    "db:seed": "tsx scripts/seed.ts",
+    "preauth:reset-owner": "npm run native:node",
+    "auth:reset-owner": "tsx scripts/reset-owner-credentials.ts"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "concurrently": "^9.1.2",
     "cross-env": "^7.0.3",
-    "prisma": "^6.8.2",
+    "drizzle-kit": "^0.31.10",
+    "electron": "36.3.1",
     "tsx": "^4.19.4",
     "typescript": "^5.8.3"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.11.1",
+    "drizzle-orm": "^0.45.2"
   }
 }

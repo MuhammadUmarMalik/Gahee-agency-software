@@ -6,7 +6,7 @@ export const signedMoneyInputSchema = z.string().trim().regex(/^-?\d{1,9}(\.\d{1
 const optionalText = (max: number) => z.string().trim().max(max).optional();
 const customerFields = z.object({
   name: z.string().trim().min(2).max(100), businessName: optionalText(150), phone: optionalText(30), whatsapp: optionalText(30),
-  address: optionalText(500), taxIdentifier: optionalText(50), customerType: z.enum(CUSTOMER_TYPES),
+  address: optionalText(500), taxIdentifier: z.string().trim().max(50).regex(/^$|^(?:\d{7}|\d{13})$/, "Enter a 7 digit NTN or a 13 digit CNIC.").optional(), province: optionalText(80), fbrRegistrationType: z.enum(["REGISTERED", "UNREGISTERED"]).default("UNREGISTERED"), customerType: z.enum(CUSTOMER_TYPES),
   paymentTermsDays: z.number().int().min(0).max(3650), isActive: z.boolean(),
 });
 export const createCustomerInputSchema = customerFields.extend({ openingBalance: signedMoneyInputSchema });

@@ -1,10 +1,12 @@
-import type { PaymentMethod } from "@prisma/client";
-import type { TransactionClient } from "../inventory/stock-engine.js";
+import type { PaymentMethod } from "../../lib/db.js";
+import { HttpError } from "../../lib/http-error.js";
+import type { TransactionClient } from "../../lib/db.js";
 import { AccountingPostingService } from "../accounting/posting.service.js";
 
 const number = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
 export class SalePaymentService {
   async create(tx: TransactionClient, data: { saleId: string; customerId: string | null; method: PaymentMethod; amountMinor: number; reference: string | null; paidAt: Date; userId: string }) {
+    if (!Number.isSafeInteger(data.amountMinor) || data.amountMinor <= 0) throw new HttpError(400, "INVALID_PAYMENT", "Payment amount must be greater than zero.");
     if (data.method === "CASH") await AccountingPostingService.assertCashDayOpen(tx, data.paidAt);
     const payment = await tx.payment.create({ data: { receiptNumber: number("RCP"), direction: "IN", partyType: data.customerId ? "CUSTOMER" : "OTHER", customerId: data.customerId, saleId: data.saleId, method: data.method, amountMinor: data.amountMinor, reference: data.reference, paidAt: data.paidAt, createdById: data.userId } });
     if (data.customerId) await tx.customerLedger.create({ data: { customerId: data.customerId, entryType: "PAYMENT", debitMinor: 0, creditMinor: data.amountMinor, sourceType: "PAYMENT", sourceId: payment.id, saleId: data.saleId, paymentId: payment.id, notes: `Receipt ${payment.receiptNumber}`, occurredAt: data.paidAt, createdById: data.userId } });

@@ -2,7 +2,7 @@
 
 ## Design invariants
 
-The canonical Prisma data model is [`prisma/schema.prisma`](../prisma/schema.prisma). It targets Prisma 6.8 and SQLite.
+The canonical data model is [`apps/api/src/db/schema.ts`](../apps/api/src/db/schema.ts). It targets Drizzle ORM and SQLite.
 
 - Every monetary value uses an integer minor-unit field such as `totalMinor`. For PKR, `125050` means PKR 1,250.50. No `Float` is used for money.
 - Every inventory quantity uses an integer base-unit field such as `quantityBase`. A product whose base unit is bottle and whose carton packing has `unitsPerPack = 12` stores two cartons plus five bottles as `29`.
@@ -61,7 +61,7 @@ Every `SalesReturn` references its original `Sale`; every `SalesReturnItem` refe
 
 ## Seed data structure
 
-The idempotent seed implementation is [`prisma/seed.ts`](../prisma/seed.ts). It creates:
+The idempotent seed implementation is [`scripts/seed.ts`](../scripts/seed.ts). It creates:
 
 1. Stable permission codes such as `pos:use`, `inventory:adjust`, and `reports:sensitive`.
 2. System roles `OWNER`, `ADMIN`, and `CASHIER`, followed by their role-permission join rows.
@@ -74,14 +74,14 @@ Production seeds should not create sample financial transactions. Optional demo 
 
 ## Migration notes
 
-1. Use Prisma 6.2 or newer; SQLite enum support was added in 6.2. This project pins Prisma 6.8.
+1. Use Drizzle 6.2 or newer; SQLite enum support was added in 6.2. This project pins Drizzle 6.8.
 2. Generate and inspect the initial migration with `npm run db:migrate -- --name initial`. Keep the generated SQL under version control.
-3. SQLite stores Prisma enums as text. Prisma validates them, but direct SQL can still write invalid text. If any tool writes outside Prisma, add `CHECK` constraints for enum columns in the reviewed migration.
-4. Add SQLite `BEFORE UPDATE` and `BEFORE DELETE` triggers that abort changes to `StockMovement`, `CustomerLedger`, `SupplierLedger`, and `CashbookEntry`. Prisma schema syntax cannot declare triggers.
+3. SQLite stores text enums as text. Drizzle validates them, but direct SQL can still write invalid text. If any tool writes outside Drizzle, add `CHECK` constraints for enum columns in the reviewed migration.
+4. Add SQLite `BEFORE UPDATE` and `BEFORE DELETE` triggers that abort changes to `StockMovement`, `CustomerLedger`, `SupplierLedger`, and `CashbookEntry`. Drizzle schema syntax cannot declare triggers.
 5. Enable `PRAGMA foreign_keys = ON`, `journal_mode = WAL`, and a sensible `busy_timeout` on each application connection.
 6. Back up the database and run `PRAGMA integrity_check` before deployment migrations. SQLite table-altering migrations often rebuild tables, so test them against a copy of realistic data.
 7. Data backfills must translate old free-form status strings to enum values before the application reads them. Reject unknown values rather than silently coercing them.
-8. Use `prisma migrate deploy` in packaged releases. Never use `db push` against a production agency database.
+8. Packaged releases use Drizzle's `better-sqlite3` runtime migrator against committed SQL files. `drizzle-kit migrate` is only a development/deployment CLI; never use schema push against a production agency database.
 9. After each inventory-affecting migration, reconcile cached product/batch balances with the sum of immutable stock movements.
 
 Example append-only trigger to include in the reviewed SQL migration:
@@ -119,7 +119,7 @@ Equivalent triggers are required for both ledgers and the cashbook.
 | Return batch error | Returned batch must match the original sale allocation unless an authorized quarantine workflow records otherwise |
 | Damage/expiry drift | Quantity must be positive and available in the chosen product/batch before posting the negative movement |
 | Soft-delete uniqueness | Deleted master records keep unique SKU/code/name values; reactivate or rename rather than silently duplicating identity |
-| Enum corruption | Prevent direct database writes or add migration `CHECK` constraints; SQLite itself does not enforce Prisma enums |
+| Enum corruption | Prevent direct database writes or add migration `CHECK` constraints; SQLite itself does not enforce text enums |
 | Integer overflow | Application limits must keep every `Int` money value below 2,147,483,647 minor units; move monetary fields to `BigInt` if that ceiling is insufficient |
 | Concurrent writers | Keep transactions short, use WAL/busy timeout, and retry only recognized SQLite busy errors |
 | Historical deletion | No hard-delete endpoints for posted documents, movements, ledgers, cashbook, returns, payments, or audit logs |

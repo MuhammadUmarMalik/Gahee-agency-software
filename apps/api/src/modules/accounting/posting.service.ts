@@ -1,6 +1,5 @@
-import type { PaymentMethod, SourceType } from "@prisma/client";
+import type { AppDbClient, TransactionClient, PaymentMethod, SourceType, StockMovementType, BackupKind, JobType, JobStatus, CashDirection, CashbookEntryType, ReturnCondition } from "../../lib/db.js";
 import { HttpError } from "../../lib/http-error.js";
-import type { TransactionClient } from "../inventory/stock-engine.js";
 import { pakistanBusinessDate } from "../../lib/business-time.js";
 
 export type SystemAccountCode = "CASH" | "BANK_CLEARING" | "AR" | "INVENTORY" | "INPUT_TAX" | "AP" | "OUTPUT_TAX" | "CAPITAL" | "DRAWINGS" | "OPENING_EQUITY" | "RETAINED_EARNINGS" | "SALES" | "OTHER_INCOME" | "SALES_RETURNS" | "SALES_DISCOUNTS" | "COGS" | "INVENTORY_LOSS" | "EXPENSE_GENERAL" | "CASH_OVER_SHORT";
@@ -49,19 +48,27 @@ const SYSTEM_ACCOUNTS: Array<{ code: string; name: string; type: "ASSET" | "LIAB
 ];
 
 const reference = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+const yearPeriod = (date: Date) => {
+  const year = date.getUTCFullYear();
+  return {
+    name: `${year}`,
+    startDate: new Date(Date.UTC(year, 0, 1, 0, 0, 0, 0)),
+    endDate: new Date(Date.UTC(year, 11, 31, 23, 59, 59, 999)),
+  };
+};
 
 export class AccountingPostingService {
   static async ensureFoundation(tx: TransactionClient, transactionDate: Date) {
     for (const account of SYSTEM_ACCOUNTS) {
       await tx.account.upsert({ where: { code: account.code }, update: { name: account.name, type: account.type, normalBalance: account.normalBalance, systemCode: account.systemCode, isSystem: true, isActive: true, deletedAt: null }, create: { ...account, isSystem: true } });
     }
-    const date = new Date(transactionDate);
-    const year = date.getUTCFullYear();
-    const name = `${year}`;
+    const period = yearPeriod(transactionDate);
+    const existing = await tx.financialPeriod.findFirst({ where: { startDate: { lte: transactionDate }, endDate: { gte: transactionDate } }, select: { id: true } });
+    if (existing) return;
     await tx.financialPeriod.upsert({
-      where: { name },
-      update: {},
-      create: { name, startDate: new Date(Date.UTC(year, 0, 1, 12)), endDate: new Date(Date.UTC(year, 11, 31, 12)) },
+      where: { name: period.name },
+      update: { startDate: period.startDate, endDate: period.endDate },
+      create: period,
     });
   }
 
@@ -83,7 +90,10 @@ export class AccountingPostingService {
 
   static async assertOpenPeriod(tx: TransactionClient, transactionDate: Date) {
     await this.ensureFoundation(tx, transactionDate);
-    const period = await tx.financialPeriod.findFirst({ where: { startDate: { lte: transactionDate }, endDate: { gte: transactionDate } }, orderBy: { startDate: "desc" } });
+    const fallback = yearPeriod(transactionDate);
+    const period =
+      (await tx.financialPeriod.findFirst({ where: { startDate: { lte: transactionDate }, endDate: { gte: transactionDate } }, orderBy: { startDate: "desc" } })) ??
+      (await tx.financialPeriod.findUnique({ where: { name: fallback.name } }));
     if (!period) throw new HttpError(409, "FINANCIAL_PERIOD_MISSING", "No financial period covers this transaction date.");
     if (period.status !== "OPEN") throw new HttpError(409, "FINANCIAL_PERIOD_CLOSED", `Financial period ${period.name} is ${period.status.toLowerCase()}.`);
     return period;
@@ -91,9 +101,16 @@ export class AccountingPostingService {
 
   static async assertCashDayOpen(tx: TransactionClient, transactionDate: Date) {
     const day = pakistanBusinessDate(transactionDate);
+    await this.reopenPrematureAutomaticClosing(tx, day);
     if (await tx.dailyClosing.findUnique({ where: { businessDate: day }, select: { id: true } })) {
       throw new HttpError(409, "DAY_ALREADY_CLOSED", "Cash activity cannot be posted after the business day is closed.");
     }
+  }
+
+  private static async reopenPrematureAutomaticClosing(tx: TransactionClient, businessDate: Date) {
+    if (businessDate.valueOf() !== pakistanBusinessDate().valueOf()) return;
+    const closing = await tx.dailyClosing.findUnique({ where: { businessDate }, select: { id: true, notes: true } });
+    if (closing?.notes?.startsWith("Automatically closed at")) await tx.dailyClosing.delete({ where: { id: closing.id } });
   }
 
   static async post(tx: TransactionClient, input: PostJournalInput) {

@@ -2,7 +2,7 @@
 
 ## 1. Project architecture
 
-The application is a local-first modular monolith. Electron owns the desktop lifecycle and starts the Express API on `127.0.0.1` using an ephemeral port. React never receives database file access; it calls the loopback API with a short-lived bearer token. Express owns validation, permissions, transactions, ledger rules, and Prisma access. SQLite is the single source of truth.
+The application is a local-first modular monolith. Electron owns the desktop lifecycle and starts the Express API on `127.0.0.1` using an ephemeral port. React never receives database file access; it calls the loopback API with a short-lived bearer token. Express owns validation, permissions, transactions, ledger rules, and Drizzle access. SQLite is the single source of truth.
 
 ```text
 Electron main process
@@ -11,17 +11,17 @@ Electron main process
   └─ opens one hardened BrowserWindow
           │ preload (small, typed IPC allow-list)
           ▼
-React renderer ──HTTP──> Express modules ──> domain services ──> Prisma ──> SQLite
+React renderer ──HTTP──> Express modules ──> domain services ──> Drizzle ──> SQLite
 ```
 
 Key decisions:
 
 - Money is stored as integer paisa (`amountMinor`) to avoid floating-point errors.
 - Quantities are integer smallest units. `unitsPerPack` converts cartons to pieces.
-- All inventory, sale, purchase, ledger, and cashbook mutations run in a Prisma transaction.
+- All inventory, sale, purchase, ledger, and cashbook mutations run in a Drizzle transaction.
 - Stock balance is a cached projection on `Product`/`ProductBatch`; `StockMovement` is the immutable audit source.
 - Ledger balances are derived from immutable ledger entries, not manually editable totals.
-- Business states use Prisma enums and shared Zod input schemas. SQLite stores enum values as text; Prisma enforces them at the ORM boundary.
+- Business states use text enums and shared Zod input schemas. SQLite stores enum values as text; Drizzle enforces them at the ORM boundary.
 - Soft deletion is used for master data. Financial documents are voided, never deleted.
 - Electron uses `contextIsolation`, disables Node integration, and binds the API to loopback only.
 
@@ -33,7 +33,7 @@ apps/
     app.ts                 Express composition
     server.ts              standalone development entry
     config/                environment parsing
-    lib/                   Prisma, errors, security helpers
+    lib/                   Drizzle, errors, security helpers
     middleware/            auth, permissions, errors
     modules/<module>/       route, validation, service
   desktop/
@@ -47,16 +47,18 @@ apps/
       styles/              Tailwind entry
 packages/
   shared/src/              DTOs, constants, Zod contracts
-prisma/
-  schema.prisma
+drizzle/
+  0000_closed_zeigeist.sql
+apps/api/src/db/
+  schema.ts
   seed.ts
 docs/
   ARCHITECTURE.md
 ```
 
-## 3. Prisma schema
+## 3. Drizzle schema
 
-The complete schema is in `prisma/schema.prisma`. It covers users/roles, master data, batches, immutable stock movement, purchases, sales, both ledgers, payments, returns, damage/expiry, cashbook, settings, audit logs, sessions, and login history.
+The complete schema is in `apps/api/src/db/schema.ts`, with generated SQL migrations in `drizzle/`. It covers users/roles, master data, batches, immutable stock movement, purchases, sales, both ledgers, payments, returns, damage/expiry, cashbook, settings, audit logs, sessions, and login history.
 
 ## 4. API modules
 

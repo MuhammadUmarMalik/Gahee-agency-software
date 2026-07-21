@@ -1,9 +1,14 @@
 import "dotenv/config";
-import argon2 from "argon2";
-import { PrismaClient } from "@prisma/client";
+import { randomUUID } from "node:crypto";
+import { pathToFileURL } from "node:url";
+import { eq, inArray, isNull } from "drizzle-orm";
 import { DEFAULT_BACKUP_SETTING, DEFAULT_BUSINESS_SETTING, DEFAULT_PRINTING_SETTING, DEFAULT_SHORTCUT_SETTING, ownerPinSchema, passwordSchema, PERMISSIONS, ROLE_PERMISSIONS } from "@oil-agency/shared";
+import { closeDb, orm as db } from "../apps/api/src/lib/db.js";
+import { account, category, expenseCategory, financialPeriod, permission, role, rolePermission, setting, unit, user } from "../apps/api/src/db/schema.js";
+import { hashSecret } from "../apps/api/src/lib/password.js";
 
-const prisma = new PrismaClient();
+const id = () => randomUUID();
+const now = () => new Date();
 
 const permissionDescriptions: Record<string, string> = {
   [PERMISSIONS.DASHBOARD_VIEW]: "View the role-appropriate dashboard",
@@ -32,34 +37,38 @@ const permissionDescriptions: Record<string, string> = {
   [PERMISSIONS.BACKUP_MANAGE]: "Create and restore backups",
 };
 
-async function main() {
+export async function seedDatabase(options: { createOwner?: boolean } = {}) {
   for (const [code, description] of Object.entries(permissionDescriptions)) {
-    await prisma.permission.upsert({ where: { code }, update: { description }, create: { code, description } });
+    await db.insert(permission).values({ id: id(), code, description }).onConflictDoUpdate({ target: permission.code, set: { description } });
   }
 
   for (const [code, permissions] of Object.entries(ROLE_PERMISSIONS)) {
-    const role = await prisma.role.upsert({ where: { code }, update: { name: code[0] + code.slice(1).toLowerCase(), isSystem: true }, create: { code, name: code[0] + code.slice(1).toLowerCase(), isSystem: true } });
-    await prisma.rolePermission.deleteMany({ where: { roleId: role.id } });
-    const records = await prisma.permission.findMany({ where: { code: { in: [...permissions] } } });
-    await prisma.rolePermission.createMany({ data: records.map((permission) => ({ roleId: role.id, permissionId: permission.id })) });
+    const roleName = code[0] + code.slice(1).toLowerCase();
+    await db.insert(role).values({ id: id(), code, name: roleName, isSystem: true, createdAt: now(), updatedAt: now() }).onConflictDoUpdate({ target: role.code, set: { name: roleName, isSystem: true, updatedAt: now() } });
+    const [roleRecord] = await db.select().from(role).where(eq(role.code, code)).limit(1);
+    if (!roleRecord) throw new Error(`Role ${code} was not created.`);
+    await db.delete(rolePermission).where(eq(rolePermission.roleId, roleRecord.id));
+    const records = await db.select().from(permission).where(inArray(permission.code, [...permissions]));
+    if (records.length) await db.insert(rolePermission).values(records.map((record) => ({ roleId: roleRecord.id, permissionId: record.id }))).onConflictDoNothing();
   }
 
-  const ownerRole = await prisma.role.findUniqueOrThrow({ where: { code: "OWNER" } });
-  const username = (process.env.SEED_OWNER_USERNAME ?? "owner").toLowerCase();
-  const password = passwordSchema.parse(process.env.SEED_OWNER_PASSWORD);
-  const pin = ownerPinSchema.parse(process.env.SEED_OWNER_PIN);
-  await prisma.user.upsert({
-    where: { username },
-    update: { roleId: ownerRole.id, isActive: true },
-    create: { username, displayName: "Business Owner", passwordHash: await argon2.hash(password), ownerPinHash: await argon2.hash(pin), roleId: ownerRole.id },
-  });
-
-  for (const unit of [{ name: "Tin", symbol: "tin" }, { name: "Balti", symbol: "balti" }, { name: "Bottle", symbol: "btl" }, { name: "Pouch", symbol: "pouch" }, { name: "Tray", symbol: "tray" }, { name: "Box", symbol: "box" }, { name: "Pack", symbol: "pack" }]) {
-    await prisma.unit.upsert({ where: { symbol: unit.symbol }, update: unit, create: unit });
+  if (options.createOwner ?? process.env.SEED_CREATE_OWNER !== "false") {
+    const [ownerRole] = await db.select().from(role).where(eq(role.code, "OWNER")).limit(1);
+    if (!ownerRole) throw new Error("OWNER role was not created.");
+    const username = (process.env.SEED_OWNER_USERNAME ?? "owner").toLowerCase();
+    const password = passwordSchema.parse(process.env.SEED_OWNER_PASSWORD);
+    const pin = ownerPinSchema.parse(process.env.SEED_OWNER_PIN);
+    await db.insert(user).values({ id: id(), username, displayName: "Business Owner", passwordHash: await hashSecret(password), ownerPinHash: await hashSecret(pin), roleId: ownerRole.id, createdAt: now(), updatedAt: now() }).onConflictDoUpdate({ target: user.username, set: { roleId: ownerRole.id, isActive: true, updatedAt: now() } });
   }
-  for (const name of ["Cooking Oil", "Ghee"]) await prisma.category.upsert({ where: { name }, update: {}, create: { name } });
+
+  for (const item of [{ name: "Tin", symbol: "tin" }, { name: "Balti", symbol: "balti" }, { name: "Bottle", symbol: "btl" }, { name: "Pouch", symbol: "pouch" }, { name: "Tray", symbol: "tray" }, { name: "Box", symbol: "box" }, { name: "Pack", symbol: "pack" }]) {
+    await db.insert(unit).values({ id: id(), ...item, createdAt: now(), updatedAt: now() }).onConflictDoUpdate({ target: unit.symbol, set: { ...item, updatedAt: now() } });
+  }
+  for (const name of ["Cooking Oil", "Ghee"]) {
+    await db.insert(category).values({ id: id(), name, createdAt: now(), updatedAt: now() }).onConflictDoNothing({ target: category.name });
+  }
   for (const name of ["Freight", "Loading & Unloading", "Food & Refreshments", "Utilities", "Rent", "Salary & Wages", "Vehicle & Fuel", "Repairs & Maintenance", "Office Supplies", "Other"]) {
-    await prisma.expenseCategory.upsert({ where: { name }, update: { isActive: true, deletedAt: null }, create: { name } });
+    await db.insert(expenseCategory).values({ id: id(), name, createdAt: now(), updatedAt: now() }).onConflictDoUpdate({ target: expenseCategory.name, set: { isActive: true, deletedAt: null, updatedAt: now() } });
   }
 
   const accounts = [
@@ -86,24 +95,23 @@ async function main() {
     { code: "6000", name: "Operating Expenses", type: "EXPENSE", normalBalance: "DEBIT", systemCode: "EXPENSE_GENERAL" },
     { code: "6100", name: "Cash Over and Short", type: "EXPENSE", normalBalance: "DEBIT", systemCode: "CASH_OVER_SHORT" },
   ] as const;
-  for (const account of accounts) {
-    await prisma.account.upsert({
-      where: { code: account.code },
-      update: { name: account.name, type: account.type, normalBalance: account.normalBalance, systemCode: "systemCode" in account ? account.systemCode : undefined, isSystem: true, isActive: true, deletedAt: null },
-      create: { ...account, isSystem: true },
-    });
+  for (const item of accounts) {
+    await db.insert(account).values({ id: id(), ...item, isSystem: true, createdAt: now(), updatedAt: now() }).onConflictDoUpdate({ target: account.code, set: { name: item.name, type: item.type, normalBalance: item.normalBalance, systemCode: "systemCode" in item ? item.systemCode : null, isSystem: true, isActive: true, deletedAt: null, updatedAt: now() } });
   }
-  const expenseAccount = await prisma.account.findUniqueOrThrow({ where: { systemCode: "EXPENSE_GENERAL" } });
-  await prisma.expenseCategory.updateMany({ where: { accountId: null }, data: { accountId: expenseAccount.id } });
+  const [expenseAccount] = await db.select().from(account).where(eq(account.systemCode, "EXPENSE_GENERAL")).limit(1);
+  if (!expenseAccount) throw new Error("EXPENSE_GENERAL account was not created.");
+  await db.update(expenseCategory).set({ accountId: expenseAccount.id, updatedAt: now() }).where(isNull(expenseCategory.accountId));
+
   const year = new Date().getFullYear();
-  await prisma.financialPeriod.upsert({
-    where: { name: `${year}` },
-    update: {},
-    create: { name: `${year}`, startDate: new Date(Date.UTC(year, 0, 1, 12)), endDate: new Date(Date.UTC(year, 11, 31, 12)) },
-  });
+  await db.insert(financialPeriod).values({ id: id(), name: `${year}`, startDate: new Date(Date.UTC(year, 0, 1, 12)), endDate: new Date(Date.UTC(year, 11, 31, 12)), createdAt: now(), updatedAt: now() }).onConflictDoNothing({ target: financialPeriod.name });
   for (const [key, value] of Object.entries({ business: DEFAULT_BUSINESS_SETTING, shortcuts: DEFAULT_SHORTCUT_SETTING, printing: DEFAULT_PRINTING_SETTING, backup: DEFAULT_BACKUP_SETTING })) {
-    await prisma.setting.upsert({ where: { key }, update: {}, create: { key, valueJson: JSON.stringify(value) } });
+    await db.insert(setting).values({ key, valueJson: JSON.stringify(value), updatedAt: now() }).onConflictDoNothing({ target: setting.key });
   }
 }
 
-main().then(() => console.log("Database seeded successfully.")).finally(() => prisma.$disconnect());
+const isDirectExecution = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (isDirectExecution) {
+  seedDatabase()
+    .then(() => console.log("Database seeded successfully."))
+    .finally(() => closeDb());
+}

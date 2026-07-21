@@ -1,4 +1,4 @@
-import type { PrismaClient, StockMovementType } from "@prisma/client";
+import type { AppDbClient, TransactionClient, PaymentMethod, SourceType, StockMovementType, BackupKind, JobType, JobStatus, CashDirection, CashbookEntryType, ReturnCondition } from "../../lib/db.js";
 import type { CartonOpenInput, InventoryAdjustmentInput, InventoryWriteOffInput, StockCountInput } from "@oil-agency/shared";
 import { HttpError } from "../../lib/http-error.js";
 import { applyStockMovement, toBaseQuantity } from "./stock-engine.js";
@@ -8,7 +8,7 @@ const uid = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toStrin
 const startOfToday = () => { const date = new Date(); date.setHours(0, 0, 0, 0); return date; };
 
 export class InventoryService {
-  constructor(private readonly db: PrismaClient) {}
+  constructor(private readonly db: AppDbClient) {}
 
   async stock(search = "", lowOnly = false, includeInactive = false) {
     const products = await this.db.product.findMany({ where: { deletedAt: null, ...(!includeInactive ? { isActive: true } : {}), ...(search ? { OR: [{ name: { contains: search } }, { sku: { contains: search } }, { barcode: { contains: search } }] } : {}) }, include: { baseUnit: true, packings: { where: { isActive: true }, orderBy: { unitsPerPack: "desc" } }, batches: { orderBy: { expiryDate: "asc" } }, stockMovements: { where: { movementType: { in: ["OPENING_STOCK", "SALES_RETURN", "DAMAGE", "EXPIRY"] } }, select: { movementType: true, quantityBase: true } } }, orderBy: { name: "asc" } });

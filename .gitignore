@@ -10,3 +10,7 @@ dist-electron/
 *.db-wal
 coverage/
 release/
+.vscode/
+tmp-asar/
+db-*.js
+design-qa.md

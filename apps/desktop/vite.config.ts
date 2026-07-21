@@ -14,7 +14,16 @@ export default defineConfig({
       },
       vite: {
         resolve: { alias: { "@oil-agency/shared": path.resolve(__dirname, "../../packages/shared/src/index.ts") } },
-        build: { rollupOptions: { external: ["@prisma/client", "argon2"] } },
+        build: {
+          rollupOptions: {
+            external: [
+              "better-sqlite3",
+            ],
+            output: {
+              entryFileNames: "main.js",
+            },
+          },
+        },
       },
     },
     preload: { input: "electron/preload.ts" },

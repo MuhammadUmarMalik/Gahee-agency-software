@@ -21,7 +21,7 @@ Technology stack:
 - Zod
 - Node.js
 - Express
-- Prisma
+- Drizzle
 - SQLite
 
 The application must be simple, fast, and suitable for non-technical users.
@@ -72,7 +72,7 @@ Do not add:
 First produce:
 1. Project architecture
 2. Folder structure
-3. Prisma schema
+3. Drizzle schema
 4. API modules
 5. Page list
 6. Implementation order
@@ -88,7 +88,7 @@ Return complete files with file paths.
 ```text
 Act as a senior database architect.
 
-Design a Prisma schema for a Cooking Oil and Ghee Agency Management System using SQLite.
+Design a Drizzle schema for a Cooking Oil and Ghee Agency Management System using SQLite.
 
 Required entities:
 - User
@@ -131,7 +131,7 @@ Business rules:
 - Use enums for transaction types and statuses.
 
 Return:
-1. Complete schema.prisma
+1. Complete Drizzle SQLite schema
 2. Relationship explanation
 3. Seed data structure
 4. Migration notes
@@ -163,7 +163,7 @@ Requirements:
 - Audit log for user changes
 
 Create:
-- Prisma models
+- Drizzle tables
 - Auth service
 - Auth controller
 - Middleware
@@ -216,7 +216,7 @@ Requirements:
 - Support carton and piece configuration
 - Use React Hook Form and Zod
 - Use shadcn/ui
-- Use Prisma and Express API
+- Use Drizzle and Express API
 - Add audit logs
 
 Return API routes, controller, service, validation, React pages, table, form, and tests.
@@ -292,7 +292,7 @@ Requirements:
 
 Use a database transaction so purchase, stock, payment, and supplier ledger update together.
 
-Create Prisma models, service, controller, validation, purchase form, list, detail page, payment form, and tests.
+Create Drizzle tables, service, controller, validation, purchase form, list, detail page, payment form, and tests.
 ```
 
 ## 7. POS Prompt
@@ -562,7 +562,7 @@ Include:
 
 Use fictional business names and Pakistani phone formats.
 Do not use real CNIC or NTN numbers.
-Return Prisma seed.ts.
+Return Drizzle seed.ts.
 ```
 
 ## 16. Testing Prompt
@@ -614,7 +614,7 @@ Rules:
 
 Implementation order:
 1. Project setup
-2. Prisma schema
+2. Drizzle schema
 3. Seed data
 4. Authentication
 5. Products

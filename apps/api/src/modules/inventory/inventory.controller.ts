@@ -1,6 +1,6 @@
 import type { Request, Response } from "express";
 import { cartonOpenSchema, INVENTORY_MOVEMENT_TYPES, inventoryAdjustmentSchema, inventoryWriteOffSchema, stockCountSchema } from "@oil-agency/shared";
-import type { StockMovementType } from "@prisma/client";
+import type { AppDbClient, TransactionClient, PaymentMethod, SourceType, StockMovementType, BackupKind, JobType, JobStatus, CashDirection, CashbookEntryType, ReturnCondition } from "../../lib/db.js";
 import { HttpError } from "../../lib/http-error.js";
 import type { InventoryService } from "./inventory.service.js";
 

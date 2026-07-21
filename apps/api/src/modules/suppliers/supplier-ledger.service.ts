@@ -1,20 +1,24 @@
-import type { PrismaClient, SupplierLedger } from "@prisma/client";
+import type { AppDbClient } from "../../lib/db.js";
 import { HttpError } from "../../lib/http-error.js";
 import { minorToMoney } from "../products/product.service.js";
 import { AccountingPostingService } from "../accounting/posting.service.js";
+import { pakistanDate, pakistanDay } from "../../lib/business-time.js";
 
-export const supplierPayableMinor = (entries: Array<Pick<SupplierLedger, "debitMinor" | "creditMinor">>) => entries.reduce((sum, entry) => sum + entry.creditMinor - entry.debitMinor, 0);
-export function supplierAging(entries: Array<Pick<SupplierLedger, "debitMinor" | "creditMinor" | "dueDate" | "occurredAt">>, asOf = new Date()) { const debts: Array<{ remaining: number; dueDate: Date | null }> = []; let advance = 0; for (const entry of [...entries].sort((a, b) => a.occurredAt.valueOf() - b.occurredAt.valueOf())) { let credit = entry.creditMinor; if (credit && advance) { const used = Math.min(credit, advance); credit -= used; advance -= used; } if (credit) debts.push({ remaining: credit, dueDate: entry.dueDate }); let debit = entry.debitMinor; for (const debt of debts) { if (!debit) break; const used = Math.min(debit, debt.remaining); debt.remaining -= used; debit -= used; } advance += debit; } const start = new Date(asOf); start.setHours(0, 0, 0, 0); const open = debts.filter((debt) => debt.remaining > 0 && debt.dueDate); return { overdueMinor: open.filter((debt) => debt.dueDate! < start).reduce((sum, debt) => sum + debt.remaining, 0), earliestDueDate: open.sort((a, b) => a.dueDate!.valueOf() - b.dueDate!.valueOf())[0]?.dueDate ?? null }; }
+type SupplierLedgerMoney = { debitMinor: number; creditMinor: number };
+type SupplierLedgerAgingEntry = SupplierLedgerMoney & { dueDate: Date | null; occurredAt: Date };
+
+export const supplierPayableMinor = (entries: SupplierLedgerMoney[]) => entries.reduce((sum, entry) => sum + entry.creditMinor - entry.debitMinor, 0);
+export function supplierAging(entries: SupplierLedgerAgingEntry[], asOf = new Date()) { const debts: Array<{ remaining: number; dueDate: Date | null }> = []; let advance = 0; for (const entry of [...entries].sort((a, b) => a.occurredAt.valueOf() - b.occurredAt.valueOf())) { let credit = entry.creditMinor; if (credit && advance) { const used = Math.min(credit, advance); credit -= used; advance -= used; } if (credit) debts.push({ remaining: credit, dueDate: entry.dueDate }); let debit = entry.debitMinor; for (const debt of debts) { if (!debit) break; const used = Math.min(debit, debt.remaining); debt.remaining -= used; debit -= used; } advance += debit; } const start = pakistanDay(pakistanDate(asOf)).start; const open = debts.filter((debt): debt is { remaining: number; dueDate: Date } => debt.remaining > 0 && debt.dueDate !== null); return { overdueMinor: open.filter((debt) => debt.dueDate < start).reduce((sum, debt) => sum + debt.remaining, 0), earliestDueDate: open.sort((a, b) => a.dueDate.valueOf() - b.dueDate.valueOf())[0]?.dueDate ?? null }; }
 
 export class SupplierLedgerService {
-  constructor(private readonly db: PrismaClient) {}
+  constructor(private readonly db: AppDbClient) {}
   async statement(supplierId: string, from?: string, to?: string) {
     const supplier = await this.db.supplier.findFirst({ where: { id: supplierId, deletedAt: null } }); if (!supplier) throw new HttpError(404, "SUPPLIER_NOT_FOUND", "Supplier was not found.");
-    const all = await this.db.supplierLedger.findMany({ where: { supplierId, ...(to ? { occurredAt: { lte: new Date(`${to}T23:59:59.999Z`) } } : {}) }, include: { purchase: { select: { invoiceNumber: true, supplierInvoice: true } }, payment: { select: { receiptNumber: true, method: true } }, createdBy: { select: { displayName: true } }, reversalEntry: { select: { id: true } } }, orderBy: [{ occurredAt: "asc" }, { createdAt: "asc" }] });
-    const fromDate = from ? new Date(`${from}T00:00:00.000Z`) : null; let running = 0; const entries = [];
+    const all = await this.db.supplierLedger.findMany({ where: { supplierId, ...(to ? { occurredAt: { lte: pakistanDay(to).end } } : {}) }, include: { purchase: { select: { invoiceNumber: true, supplierInvoice: true } }, payment: { select: { receiptNumber: true, method: true } }, createdBy: { select: { displayName: true } }, reversalEntry: { select: { id: true } } }, orderBy: [{ occurredAt: "asc" }, { createdAt: "asc" }] });
+    const fromDate = from ? pakistanDay(from).start : null; let running = 0; const entries: Array<Record<string, unknown>> = [];
     for (const entry of all) { const previousBalanceMinor = running; running += entry.creditMinor - entry.debitMinor; if (!fromDate || entry.occurredAt >= fromDate) entries.push({ ...entry, debit: minorToMoney(entry.debitMinor), credit: minorToMoney(entry.creditMinor), previousBalance: minorToMoney(previousBalanceMinor), currentBalance: minorToMoney(running) }); }
     const previous = fromDate ? supplierPayableMinor(all.filter((entry) => entry.occurredAt < fromDate)) : 0, age = supplierAging(all);
-    return { supplier: { ...supplier, openingBalance: minorToMoney(supplier.openingBalanceMinor) }, entries, previousBalance: minorToMoney(previous), currentBalance: minorToMoney(running), overdue: minorToMoney(age.overdueMinor), earliestDueDate: age.earliestDueDate?.toISOString() ?? null, lastPurchaseAt: (await this.db.purchase.findFirst({ where: { supplierId }, orderBy: { purchasedAt: "desc" }, select: { purchasedAt: true } }))?.purchasedAt.toISOString() ?? null };
+    return { supplier: { ...supplier, openingBalance: minorToMoney(supplier.openingBalanceMinor) }, entries, previousBalance: minorToMoney(previous), currentBalance: minorToMoney(running), overdue: minorToMoney(age.overdueMinor), earliestDueDate: age.earliestDueDate?.toISOString() ?? null, lastPurchaseAt: (await this.db.purchase.findFirst({ where: { supplierId, status: "POSTED" }, orderBy: { purchasedAt: "desc" }, select: { purchasedAt: true } }))?.purchasedAt.toISOString() ?? null };
   }
   async reverse(entryId: string, reason: string, userId: string) {
     return this.db.$transaction(async (tx) => {

@@ -6,6 +6,7 @@ const valid = { supplierId: "supplier-1", supplierInvoice: "SUP-100", purchaseDa
 
 describe("purchase validation", () => {
   it("accepts a cash, credit, or partial purchase payload", () => expect(createPurchaseInputSchema.safeParse(valid).success).toBe(true));
+  it("allows a new purchase batch to be numbered automatically", () => expect(createPurchaseInputSchema.safeParse({ ...valid, items: [{ ...valid.items[0], batchNumber: "" }] }).success).toBe(true));
   it("rejects due dates before purchase date", () => expect(createPurchaseInputSchema.safeParse({ ...valid, dueDate: "2026-07-16" }).success).toBe(false));
   it("rejects expiry before manufacturing date", () => expect(createPurchaseInputSchema.safeParse({ ...valid, items: [{ ...valid.items[0], expiryDate: "2026-06-01" }] }).success).toBe(false));
   it("rejects zero-quantity lines", () => expect(createPurchaseInputSchema.safeParse({ ...valid, items: [{ ...valid.items[0], cartonQuantity: 0, pieceQuantity: 0 }] }).success).toBe(false));

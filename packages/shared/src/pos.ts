@@ -11,10 +11,23 @@ export const checkoutInputSchema = z.object({
 });
 export const holdSaleInputSchema = z.object({ label: z.string().trim().min(1).max(80), cart: z.record(z.unknown()) });
 export const saleIdSchema = z.string().min(1);
+export const saleListQuerySchema = z.object({
+  search: z.string().trim().max(100).default(""),
+  customerId: z.string().min(1).optional(),
+  paymentStatus: z.enum(["UNPAID", "PARTIAL", "PAID"]).optional(),
+  status: z.enum(["ALL", "POSTED", "VOIDED"]).default("ALL"),
+  from: z.string().date().optional(),
+  to: z.string().date().optional(),
+  page: z.coerce.number().int().positive().default(1),
+  pageSize: z.coerce.number().int().min(1).max(200).default(50),
+}).refine((value) => !value.from || !value.to || value.from <= value.to, { message: "The from date cannot be after the to date.", path: ["to"] });
+export const updateSaleMetadataInputSchema = z.object({ notes: z.string().trim().max(1000).nullable() });
 
 export type CheckoutInput = z.infer<typeof checkoutInputSchema>;
 export type HoldSaleInput = z.infer<typeof holdSaleInputSchema>;
 export type PosPaymentInput = z.infer<typeof posPaymentSchema>;
+export type SaleListQuery = z.infer<typeof saleListQuerySchema>;
+export type UpdateSaleMetadataInput = z.infer<typeof updateSaleMetadataInputSchema>;
 
 export interface PosProduct {
   id: string; name: string; sku: string; barcode: string | null; categoryId: string | null; categoryName: string | null;

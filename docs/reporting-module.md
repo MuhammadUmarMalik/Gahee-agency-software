@@ -2,7 +2,7 @@
 
 ## Phase 1 analysis
 
-The application is an Electron/React desktop client backed by Express, Prisma, and SQLite. Reporting reuses the existing `ReportService`, journal-based `AccountingService`, API authentication middleware, permission constants, business branding store, and Electron print/PDF IPC.
+The application is an Electron/React desktop client backed by Express, Drizzle, and SQLite. Reporting reuses the existing `ReportService`, journal-based `AccountingService`, API authentication middleware, permission constants, business branding store, and Electron print/PDF IPC.
 
 ### Relevant modules and schema
 

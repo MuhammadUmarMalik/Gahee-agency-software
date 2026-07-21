@@ -3,9 +3,350 @@ import { ArrowLeft, LoaderCircle, Pencil, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useNavigate, useParams } from "react-router-dom";
-import { PERMISSIONS, purchasePaymentInputSchema, type PurchasePaymentInput } from "@oil-agency/shared";
-import { ApiError, apiRequest } from "@/api/client"; import { useAppDialog } from "@/components/app-dialog"; import { Button } from "@/components/ui/button"; import { Card } from "@/components/ui/card"; import { Input } from "@/components/ui/input"; import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"; import { useAuthStore } from "@/stores/auth-store";
-type Detail={id:string;invoiceNumber:string;supplierInvoice:string;purchasedAt:string;dueDate:string|null;paymentStatus:string;subtotal:string;discount:string;tax:string;transportExpense:string;loadingExpense:string;otherExpense:string;total:string;paid:string;due:string;notes:string|null;supplier:{name:string;code:string;phone:string|null};items:Array<{id:string;packingName:string;unitsPerPack:number;packQuantity:number;baseQuantity:number;quantityBase:number;purchaseRate:string;lineTotal:string;product:{name:string;sku:string;baseUnit:{symbol:string}};batch:{batchNumber:string;manufactureDate:string|null;expiryDate:string|null}|null}>;payments:Array<{id:string;receiptNumber:string;amount:string;method:string;paidAt:string;reference:string|null;createdBy:{displayName:string}}>};
-const now=new Date().toISOString().slice(0,10);
-export function PurchaseDetailPage(){const {id}=useParams();const token=useAuthStore(s=>s.token)!;const user=useAuthStore(s=>s.user)!;const navigate=useNavigate();const dialog=useAppDialog();const [purchase,setPurchase]=useState<Detail|null>(null);const [message,setMessage]=useState("");const form=useForm<PurchasePaymentInput>({resolver:zodResolver(purchasePaymentInputSchema),defaultValues:{amount:"0.00",method:"CASH",paidAt:now,reference:"",notes:""}});const load=useCallback(async()=>{if(!id)return;try{const r=await apiRequest<{purchase:Detail}>(`/purchases/${id}`,{},token);setPurchase(r.purchase)}catch(e){setMessage(e instanceof Error?e.message:"Could not load purchase.")}},[id,token]);useEffect(()=>{void load()},[load]);async function pay(input:PurchasePaymentInput){try{await apiRequest(`/purchases/${id}/payments`,{method:"POST",body:JSON.stringify(input)},token);form.reset({amount:"0.00",method:"CASH",paidAt:now,reference:"",notes:""});setMessage("Payment posted successfully.");await load()}catch(e){setMessage(e instanceof ApiError?e.message:"Payment failed.")}}async function remove(){const reason=await dialog.prompt({title:"Delete purchase?",description:"Stock, supplier balance, payments, cashbook, and accounting entries will be reversed. Enter the reason for deletion.",confirmLabel:"Delete purchase",destructive:true,placeholder:"Reason for deleting this purchase"});if(!reason)return;try{await apiRequest(`/purchases/${id}`,{method:"DELETE",body:JSON.stringify({reason})},token);navigate("/purchases")}catch(e){setMessage(e instanceof Error?e.message:"Purchase could not be deleted.")}}if(!purchase)return <div className="grid h-screen place-items-center"><LoaderCircle className="animate-spin"/></div>;return <section className="p-8"><Button variant="ghost" className="mb-5 -ml-3" onClick={()=>navigate("/purchases")}><ArrowLeft className="mr-2" size={18}/>Back to purchases</Button><div className="mb-7 flex justify-between"><div><p className="mb-2 text-sm font-semibold text-primary">{purchase.invoiceNumber}</p><h1 className="m-0 text-3xl font-bold">{purchase.supplier.name}</h1><p className="mt-2 text-sm text-muted-foreground">Supplier invoice {purchase.supplierInvoice} · {new Date(purchase.purchasedAt).toLocaleDateString()}</p></div><div className="flex items-start gap-3"><Button variant="outline" onClick={()=>navigate(`/purchases/${id}/edit`)}><Pencil className="mr-2" size={17}/>Edit</Button>{user.permissions.includes(PERMISSIONS.ACCOUNTING_MANAGE)&&<Button variant="destructive" onClick={()=>void remove()}><Trash2 className="mr-2" size={17}/>Delete</Button>}<div className="ml-3 text-right"><p className="m-0 text-sm text-muted-foreground">Outstanding</p><p className="mt-1 text-3xl font-bold">PKR {purchase.due}</p></div></div></div>{message&&<div className="mb-5 rounded-lg bg-slate-50 p-3 text-sm">{message}</div>}<Card className="mb-5"><Table><TableHeader><TableRow><TableHead>Product</TableHead><TableHead>Batch / expiry</TableHead><TableHead>Outer packs + individual items</TableHead><TableHead>Total individual items</TableHead><TableHead>Rate</TableHead><TableHead>Total</TableHead></TableRow></TableHeader><TableBody>{purchase.items.map(item=><TableRow key={item.id}><TableCell><strong>{item.product.name}</strong><span className="block text-xs text-muted-foreground">{item.product.sku}</span></TableCell><TableCell>{item.batch?.batchNumber??"—"}<span className="block text-xs text-muted-foreground">{item.batch?.expiryDate?`Expires ${new Date(item.batch.expiryDate).toLocaleDateString()}`:"No expiry"}</span></TableCell><TableCell>{item.packQuantity} {item.packingName} + {item.baseQuantity} {item.product.baseUnit.symbol}</TableCell><TableCell>{item.quantityBase}</TableCell><TableCell>PKR {item.purchaseRate}</TableCell><TableCell>PKR {item.lineTotal}</TableCell></TableRow>)}</TableBody></Table></Card><div className="grid grid-cols-[1fr_400px] gap-5"><Card className="p-6"><h2 className="mt-0 text-lg">Payments</h2>{purchase.payments.length?<Table><TableHeader><TableRow><TableHead>Date</TableHead><TableHead>Receipt</TableHead><TableHead>Method</TableHead><TableHead>Amount</TableHead></TableRow></TableHeader><TableBody>{purchase.payments.map(p=><TableRow key={p.id}><TableCell>{new Date(p.paidAt).toLocaleDateString()}</TableCell><TableCell>{p.receiptNumber}</TableCell><TableCell>{p.method}</TableCell><TableCell>PKR {p.amount}</TableCell></TableRow>)}</TableBody></Table>:<p className="text-sm text-muted-foreground">No payments recorded.</p>}{Number(purchase.due)>0&&<form className="mt-6 grid grid-cols-2 gap-3 border-t pt-5" onSubmit={form.handleSubmit(pay)}><label className="text-sm font-medium">Amount<Input className="mt-1" {...form.register("amount")}/></label><label className="text-sm font-medium">Method<select className="mt-1 h-10 w-full rounded-lg border px-2" {...form.register("method")}><option value="CASH">Cash</option><option value="BANK_TRANSFER">Bank transfer</option><option value="CARD">Card</option><option value="CHEQUE">Cheque</option><option value="OTHER">Other</option></select></label><label className="text-sm font-medium">Payment date<Input className="mt-1" type="date" {...form.register("paidAt")}/></label><label className="text-sm font-medium">Reference<Input className="mt-1" {...form.register("reference")}/></label><div className="col-span-2 flex justify-end"><Button disabled={form.formState.isSubmitting}>Record payment</Button></div></form>}</Card><Card className="p-6"><h2 className="mt-0 text-lg">Purchase summary</h2><Summary label="Subtotal" value={purchase.subtotal}/><Summary label="Discount" value={`-${purchase.discount}`}/><Summary label="Tax" value={purchase.tax}/><Summary label="Transport" value={purchase.transportExpense}/><Summary label="Loading" value={purchase.loadingExpense}/><Summary label="Other expenses" value={purchase.otherExpense}/><div className="mt-3 border-t pt-3"><Summary label="Grand total" value={purchase.total} strong/><Summary label="Paid" value={purchase.paid}/><Summary label="Due" value={purchase.due} strong/></div><p className="mt-5 text-sm text-muted-foreground">Due date: {purchase.dueDate?new Date(purchase.dueDate).toLocaleDateString():"—"}</p></Card></div></section>}
-function Summary({label,value,strong=false}:{label:string;value:string;strong?:boolean}){return <div className={`flex justify-between py-1.5 ${strong?"font-bold text-lg":"text-sm"}`}><span>{label}</span><span>PKR {value}</span></div>}
+import {
+  PERMISSIONS,
+  purchasePaymentInputSchema,
+  type PurchasePaymentInput,
+} from "@oil-agency/shared";
+import { ApiError, apiRequest } from "@/api/client";
+import { useAppDialog } from "@/components/app-dialog";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { useAuthStore } from "@/stores/auth-store";
+type Detail = {
+  id: string;
+  invoiceNumber: string;
+  supplierInvoice: string;
+  purchasedAt: string;
+  dueDate: string | null;
+  paymentStatus: string;
+  subtotal: string;
+  discount: string;
+  tax: string;
+  transportExpense: string;
+  loadingExpense: string;
+  otherExpense: string;
+  total: string;
+  paid: string;
+  due: string;
+  notes: string | null;
+  supplier: { name: string; code: string; phone: string | null };
+  items: Array<{
+    id: string;
+    packingName: string;
+    unitsPerPack: number;
+    packQuantity: number;
+    baseQuantity: number;
+    quantityBase: number;
+    purchaseRate: string;
+    lineTotal: string;
+    product: { name: string; sku: string; baseUnit: { symbol: string } };
+    batch: {
+      batchNumber: string;
+      manufactureDate: string | null;
+      expiryDate: string | null;
+    } | null;
+  }>;
+  payments: Array<{
+    id: string;
+    receiptNumber: string;
+    amount: string;
+    method: string;
+    paidAt: string;
+    reference: string | null;
+    createdBy: { displayName: string };
+  }>;
+};
+const now = new Date().toISOString().slice(0, 10);
+export function PurchaseDetailPage() {
+  const { id } = useParams();
+  const token = useAuthStore((s) => s.token)!;
+  const user = useAuthStore((s) => s.user)!;
+  const navigate = useNavigate();
+  const dialog = useAppDialog();
+  const [purchase, setPurchase] = useState<Detail | null>(null);
+  const [message, setMessage] = useState("");
+  const form = useForm<PurchasePaymentInput>({
+    resolver: zodResolver(purchasePaymentInputSchema),
+    defaultValues: {
+      amount: "0.00",
+      method: "CASH",
+      paidAt: now,
+      reference: "",
+      notes: "",
+    },
+  });
+  const load = useCallback(async () => {
+    if (!id) return;
+    try {
+      const r = await apiRequest<{ purchase: Detail }>(
+        `/purchases/${id}`,
+        {},
+        token,
+      );
+      setPurchase(r.purchase);
+    } catch (e) {
+      setMessage(e instanceof Error ? e.message : "Could not load purchase.");
+    }
+  }, [id, token]);
+  useEffect(() => {
+    void load();
+  }, [load]);
+  async function pay(input: PurchasePaymentInput) {
+    try {
+      await apiRequest(
+        `/purchases/${id}/payments`,
+        { method: "POST", body: JSON.stringify(input) },
+        token,
+      );
+      form.reset({
+        amount: "0.00",
+        method: "CASH",
+        paidAt: now,
+        reference: "",
+        notes: "",
+      });
+      setMessage("Payment posted successfully.");
+      await load();
+    } catch (e) {
+      setMessage(e instanceof ApiError ? e.message : "Payment failed.");
+    }
+  }
+  async function remove() {
+    const reason = await dialog.prompt({
+      title: "Delete purchase?",
+      description:
+        "Stock, supplier balance, payments, cashbook, and accounting entries will be reversed. Enter the reason for deletion.",
+      confirmLabel: "Delete purchase",
+      destructive: true,
+      placeholder: "Reason for deleting this purchase",
+    });
+    if (!reason) return;
+    try {
+      await apiRequest(
+        `/purchases/${id}`,
+        { method: "DELETE", body: JSON.stringify({ reason }) },
+        token,
+      );
+      navigate("/purchases");
+    } catch (e) {
+      setMessage(
+        e instanceof Error ? e.message : "Purchase could not be deleted.",
+      );
+    }
+  }
+  if (!purchase)
+    return (
+      <div className="grid h-screen place-items-center">
+        <LoaderCircle className="animate-spin" />
+      </div>
+    );
+  return (
+    <section className="p-8">
+      <Button
+        variant="ghost"
+        className="mb-5 -ml-3"
+        onClick={() => navigate("/purchases")}
+      >
+        <ArrowLeft className="mr-2" size={18} />
+        Back to purchases
+      </Button>
+      <div className="mb-7 flex justify-between">
+        <div>
+          <p className="mb-2 text-sm font-semibold text-primary">
+            {purchase.invoiceNumber}
+          </p>
+          <h1 className="m-0 text-3xl font-bold">{purchase.supplier.name}</h1>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Supplier invoice {purchase.supplierInvoice} ·{" "}
+            {new Date(purchase.purchasedAt).toLocaleDateString()}
+          </p>
+        </div>
+        <div className="flex items-start gap-3">
+          <Button
+            variant="outline"
+            onClick={() => navigate(`/purchases/${id}/edit`)}
+          >
+            <Pencil className="mr-2" size={17} />
+            Edit
+          </Button>
+          {user.permissions.includes(PERMISSIONS.ACCOUNTING_MANAGE) && (
+            <Button variant="destructive" onClick={() => void remove()}>
+              <Trash2 className="mr-2" size={17} />
+              Delete
+            </Button>
+          )}
+          <div className="ml-3 text-right">
+            <p className="m-0 text-sm text-muted-foreground">Outstanding</p>
+            <p className="mt-1 text-3xl font-bold">PKR {purchase.due}</p>
+          </div>
+        </div>
+      </div>
+      {message && (
+        <div className="mb-5 rounded-lg bg-slate-50 p-3 text-sm">{message}</div>
+      )}
+      <Card className="mb-5">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Product</TableHead>
+              <TableHead>Batch / expiry</TableHead>
+              <TableHead>Outer packs + individual items</TableHead>
+              <TableHead>Total individual items</TableHead>
+              <TableHead>Rate</TableHead>
+              <TableHead>Total</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {purchase.items.map((item) => (
+              <TableRow key={item.id}>
+                <TableCell>
+                  <strong>{item.product.name}</strong>
+                  <span className="block text-xs text-muted-foreground">
+                    {item.product.sku}
+                  </span>
+                </TableCell>
+                <TableCell>
+                  {item.batch?.batchNumber ?? "—"}
+                  <span className="block text-xs text-muted-foreground">
+                    {item.batch?.expiryDate
+                      ? `Expires ${new Date(item.batch.expiryDate).toLocaleDateString()}`
+                      : "No expiry"}
+                  </span>
+                </TableCell>
+                <TableCell>
+                  {item.packQuantity} {item.packingName} + {item.baseQuantity}{" "}
+                  {item.product.baseUnit.symbol}
+                </TableCell>
+                <TableCell>{item.quantityBase}</TableCell>
+                <TableCell>PKR {item.purchaseRate}</TableCell>
+                <TableCell>PKR {item.lineTotal}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </Card>
+      <div className="grid grid-cols-[1fr_400px] gap-5">
+        <Card className="p-6">
+          <h2 className="mt-0 text-lg">Payments</h2>
+          {purchase.payments.length ? (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Receipt</TableHead>
+                  <TableHead>Method</TableHead>
+                  <TableHead>Amount</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {purchase.payments.map((p) => (
+                  <TableRow key={p.id}>
+                    <TableCell>
+                      {new Date(p.paidAt).toLocaleDateString()}
+                    </TableCell>
+                    <TableCell>{p.receiptNumber}</TableCell>
+                    <TableCell>{p.method}</TableCell>
+                    <TableCell>PKR {p.amount}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              No payments recorded.
+            </p>
+          )}
+          {Number(purchase.due) > 0 && (
+            <form
+              className="mt-6 grid grid-cols-2 gap-3 border-t pt-5"
+              onSubmit={form.handleSubmit(pay)}
+            >
+              <label className="text-sm font-medium">
+                Amount
+                <Input className="mt-1" {...form.register("amount")} />
+              </label>
+              <label className="text-sm font-medium">
+                Method
+                <select
+                  className="mt-1 h-10 w-full rounded-lg border px-2"
+                  {...form.register("method")}
+                >
+                  <option value="CASH">Cash</option>
+                  <option value="BANK_TRANSFER">Bank transfer</option>
+                  <option value="CARD">Card</option>
+                  <option value="CHEQUE">Cheque</option>
+                  <option value="OTHER">Other</option>
+                </select>
+              </label>
+              <label className="text-sm font-medium">
+                Payment date
+                <Input
+                  className="mt-1"
+                  type="date"
+                  {...form.register("paidAt")}
+                />
+              </label>
+              <label className="text-sm font-medium">
+                Reference
+                <Input className="mt-1" {...form.register("reference")} />
+              </label>
+              <div className="col-span-2 flex justify-end">
+                <Button disabled={form.formState.isSubmitting}>
+                  Record payment
+                </Button>
+              </div>
+            </form>
+          )}
+        </Card>
+        <Card className="p-6">
+          <h2 className="mt-0 text-lg">Purchase summary</h2>
+          <Summary label="Subtotal" value={purchase.subtotal} />
+          <Summary label="Discount" value={`-${purchase.discount}`} />
+          <Summary label="Tax" value={purchase.tax} />
+          <Summary label="Transport" value={purchase.transportExpense} />
+          <Summary label="Loading" value={purchase.loadingExpense} />
+          <Summary label="Other expenses" value={purchase.otherExpense} />
+          <div className="mt-3 border-t pt-3">
+            <Summary label="Grand total" value={purchase.total} strong />
+            <Summary label="Paid" value={purchase.paid} />
+            <Summary label="Due" value={purchase.due} strong />
+          </div>
+          <p className="mt-5 text-sm text-muted-foreground">
+            Due date:{" "}
+            {purchase.dueDate
+              ? new Date(purchase.dueDate).toLocaleDateString()
+              : "—"}
+          </p>
+        </Card>
+      </div>
+    </section>
+  );
+}
+function Summary({
+  label,
+  value,
+  strong = false,
+}: {
+  label: string;
+  value: string;
+  strong?: boolean;
+}) {
+  return (
+    <div
+      className={`flex justify-between py-1.5 ${strong ? "font-bold text-lg" : "text-sm"}`}
+    >
+      <span>{label}</span>
+      <span>PKR {value}</span>
+    </div>
+  );
+}

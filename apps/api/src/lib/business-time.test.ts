@@ -8,9 +8,9 @@ describe("Pakistan business time", () => {
     expect(pakistanBusinessDate(instant).toISOString()).toBe("2026-07-19T12:00:00.000Z");
   });
 
-  it("closes yesterday before 8 PM and today from exactly 8 PM", () => {
+  it("closes only the previous business date automatically", () => {
     expect(automaticClosingDate(new Date("2026-07-18T14:59:59.999Z"))).toBe("2026-07-17");
-    expect(automaticClosingDate(new Date("2026-07-18T15:00:00.000Z"))).toBe("2026-07-18");
+    expect(automaticClosingDate(new Date("2026-07-18T15:00:00.000Z"))).toBe("2026-07-17");
   });
 
   it("schedules the next close at exactly 8 PM Pakistan time", () => {

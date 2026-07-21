@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import type { AppDbClient } from "../../lib/db.js";
 import { Router } from "express";
 import { PERMISSIONS } from "@oil-agency/shared";
 import { authenticate } from "../../middleware/authenticate.js";
@@ -6,7 +6,7 @@ import { requirePermission } from "../../middleware/require-permission.js";
 import { PurchaseController } from "./purchase.controller.js";
 import { PurchaseService } from "./purchase.service.js";
 
-export function createPurchaseRouter(db: PrismaClient) {
+export function createPurchaseRouter(db: AppDbClient) {
   const router = Router(), controller = new PurchaseController(new PurchaseService(db));
   router.use(authenticate(db), requirePermission(PERMISSIONS.PURCHASES_MANAGE));
   router.get("/options", controller.options);

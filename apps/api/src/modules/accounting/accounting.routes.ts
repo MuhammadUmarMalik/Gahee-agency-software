@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import type { AppDbClient } from "../../lib/db.js";
 import { Router } from "express";
 import { PERMISSIONS } from "@oil-agency/shared";
 import { authenticate } from "../../middleware/authenticate.js";
@@ -6,7 +6,7 @@ import { requirePermission } from "../../middleware/require-permission.js";
 import { AccountingController } from "./accounting.controller.js";
 import { AccountingService } from "./accounting.service.js";
 
-export function createAccountingRouter(db: PrismaClient) {
+export function createAccountingRouter(db: AppDbClient) {
   const router = Router(), controller = new AccountingController(new AccountingService(db));
   router.use(authenticate(db));
   router.get("/accounts", requirePermission(PERMISSIONS.ACCOUNTING_VIEW), controller.accounts);

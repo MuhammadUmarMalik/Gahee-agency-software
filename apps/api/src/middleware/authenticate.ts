@@ -1,10 +1,10 @@
 import type { NextFunction, Request, Response } from "express";
-import type { PrismaClient } from "@prisma/client";
+import type { AppDbClient } from "../lib/db.js";
 import { ROLE_PERMISSIONS, type PermissionCode, type RoleCode } from "@oil-agency/shared";
 import { HttpError } from "../lib/http-error.js";
 import { hashToken } from "../lib/security.js";
 
-export function authenticate(db: PrismaClient) {
+export function authenticate(db: AppDbClient) {
   return async (req: Request, _res: Response, next: NextFunction) => {
     try {
       const header = req.header("authorization");

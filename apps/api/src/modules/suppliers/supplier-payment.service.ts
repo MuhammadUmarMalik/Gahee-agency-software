@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import type { AppDbClient } from "../../lib/db.js";
 import type { SupplierPaymentInput } from "@oil-agency/shared";
 import { HttpError } from "../../lib/http-error.js";
 import { moneyToMinor, minorToMoney } from "../products/product.service.js";
@@ -8,7 +8,7 @@ const ref = (prefix: string) => `${prefix}-${Date.now()}-${Math.random().toStrin
 const atNoon = (value: string) => new Date(`${value}T12:00:00.000Z`);
 
 export class SupplierPaymentService {
-  constructor(private readonly db: PrismaClient) {}
+  constructor(private readonly db: AppDbClient) {}
   async pay(supplierId: string, input: SupplierPaymentInput, userId: string) {
     const amountMinor = moneyToMinor(input.amount);
     if (amountMinor <= 0) throw new HttpError(400, "INVALID_PAYMENT", "Payment must be greater than zero.");

@@ -8,17 +8,19 @@ import {
   LockKeyhole,
   MessageCircle,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { loginInputSchema, type LoginInput } from "@oil-agency/shared";
-import { ApiError } from "@/api/client";
+import { ApiError, apiRequest } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { useAuthStore } from "@/stores/auth-store";
+import { OwnerSetupPage } from "@/pages/owner-setup-page";
 
 export function LoginPage() {
   const login = useAuthStore((state) => state.login);
+  const [mode, setMode] = useState<"checking" | "setup" | "login">("checking");
   const [showPassword, setShowPassword] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
   const {
@@ -29,6 +31,24 @@ export function LoginPage() {
     resolver: zodResolver(loginInputSchema),
     defaultValues: { username: "", password: "" },
   });
+
+  useEffect(() => {
+    void apiRequest<{ needsSetup: boolean }>("/auth/setup-status")
+      .then(({ needsSetup }) => setMode(needsSetup ? "setup" : "login"))
+      .catch(() => {
+        setServerError("The local service is unavailable. Please restart the application.");
+        setMode("login");
+      });
+  }, []);
+
+  if (mode === "checking") return <main className="grid min-h-screen place-items-center bg-background"><LoaderCircle className="animate-spin text-primary"/></main>;
+  if (mode === "setup") return <OwnerSetupPage onCompleted={async (input) => {
+    try { await login({ username: input.username, password: input.password }); }
+    catch {
+      setServerError("The owner was created successfully. Sign in with the credentials you just selected.");
+      setMode("login");
+    }
+  }}/>;
 
   async function onSubmit(input: LoginInput) {
     setServerError(null);

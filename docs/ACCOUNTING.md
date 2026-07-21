@@ -1,6 +1,6 @@
 # Accounting subsystem
 
-The accounting subsystem extends the existing POS workflows. Sales, purchases, payments, stock movements, party ledgers, expenses, returns, and the cashbook remain operational records. Each posting service now creates an immutable, balanced journal in the same Prisma transaction.
+The accounting subsystem extends the existing POS workflows. Sales, purchases, payments, stock movements, party ledgers, expenses, returns, and the cashbook remain operational records. Each posting service now creates an immutable, balanced journal in the same Drizzle transaction.
 
 ## Source of truth
 

@@ -1,5 +1,6 @@
-import { Prisma, type PrismaClient } from "@prisma/client";
+import type { AppDbClient, TransactionClient, PaymentMethod, SourceType, StockMovementType, BackupKind, JobType, JobStatus, CashDirection, CashbookEntryType, ReturnCondition } from "../../lib/db.js";
 import type { AccountInput, AccountUpdateInput, AccountingCutoverInput, BankAccountInput, FinancialPeriodInput, FinancialReportFilter, FinancialTransactionInput, JournalFilter, ManualJournalInput } from "@oil-agency/shared";
+import { isUniqueConstraintError } from "../../lib/db-errors.js";
 import { HttpError } from "../../lib/http-error.js";
 import { moneyToMinor, minorToMoney } from "../products/product.service.js";
 import { AccountingPostingService, type PostingLine } from "./posting.service.js";
@@ -14,10 +15,10 @@ const journalInclude = {
   reversalOf: { select: { id: true, entryNumber: true } },
   reversalEntry: { select: { id: true, entryNumber: true } },
   lines: { include: { account: { select: { id: true, code: true, name: true, type: true } }, customer: { select: { id: true, code: true, name: true } }, supplier: { select: { id: true, code: true, name: true } }, product: { select: { id: true, sku: true, name: true } } }, orderBy: { lineNumber: "asc" as const } },
-} satisfies Prisma.JournalEntryInclude;
+} satisfies Record<string, unknown>;
 
 export class AccountingService {
-  constructor(private readonly db: PrismaClient) {}
+  constructor(private readonly db: AppDbClient) {}
 
   async bootstrap() {
     await this.db.$transaction((tx) => AccountingPostingService.ensureFoundation(tx, new Date()));
@@ -34,7 +35,7 @@ export class AccountingService {
       const account = await tx.account.create({ data: { ...input, parentId: input.parentId ?? null } });
       await tx.auditLog.create({ data: { userId, action: "CREATE", entityType: "Account", entityId: account.id, afterJson: JSON.stringify(account) } });
       return account;
-    }).catch((error) => { if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") throw new HttpError(409, "ACCOUNT_EXISTS", "An account with this code already exists."); throw error; });
+    }).catch((error) => { if (isUniqueConstraintError(error)) throw new HttpError(409, "ACCOUNT_EXISTS", "An account with this code already exists."); throw error; });
   }
 
   async updateAccount(id: string, input: AccountUpdateInput, userId: string) {
@@ -43,7 +44,7 @@ export class AccountingService {
       if (!current || current.deletedAt) throw new HttpError(404, "ACCOUNT_NOT_FOUND", "Account was not found.");
       if (current.isSystem && (input.type || input.normalBalance || input.code)) throw new HttpError(409, "SYSTEM_ACCOUNT_PROTECTED", "System account classification and code cannot be changed.");
       if (input.parentId === id) throw new HttpError(400, "ACCOUNT_CYCLE", "An account cannot be its own parent.");
-      const data: Prisma.AccountUpdateInput = {}; if (input.code !== undefined) data.code = input.code; if (input.name !== undefined) data.name = input.name; if (input.type !== undefined) data.type = input.type; if (input.normalBalance !== undefined) data.normalBalance = input.normalBalance; if (input.allowManual !== undefined) data.allowManual = input.allowManual; if (input.isActive !== undefined) data.isActive = input.isActive; if (input.parentId !== undefined) data.parent = input.parentId === null ? { disconnect: true } : { connect: { id: input.parentId } }; const account = await tx.account.update({ where: { id }, data });
+      const data: any = {}; if (input.code !== undefined) data.code = input.code; if (input.name !== undefined) data.name = input.name; if (input.type !== undefined) data.type = input.type; if (input.normalBalance !== undefined) data.normalBalance = input.normalBalance; if (input.allowManual !== undefined) data.allowManual = input.allowManual; if (input.isActive !== undefined) data.isActive = input.isActive; if (input.parentId !== undefined) data.parent = input.parentId === null ? { disconnect: true } : { connect: { id: input.parentId } }; const account = await tx.account.update({ where: { id }, data });
       await tx.auditLog.create({ data: { userId, action: input.isActive === false ? "DEACTIVATE" : input.isActive === true ? "ACTIVATE" : "UPDATE", entityType: "Account", entityId: id, beforeJson: JSON.stringify(current), afterJson: JSON.stringify(account) } });
       return account;
     });
@@ -75,7 +76,7 @@ export class AccountingService {
   }
 
   async journals(filter: JournalFilter) {
-    const where: Prisma.JournalEntryWhereInput = { transactionDate: { gte: atNoon(filter.from), lte: endOfDay(filter.to) }, ...(filter.status ? { status: filter.status } : {}), ...(filter.accountId ? { lines: { some: { accountId: filter.accountId } } } : {}), ...(filter.search ? { OR: [{ entryNumber: { contains: filter.search } }, { description: { contains: filter.search } }, { sourceId: { contains: filter.search } }] } : {}) };
+    const where: any = { transactionDate: { gte: atNoon(filter.from), lte: endOfDay(filter.to) }, ...(filter.status ? { status: filter.status } : {}), ...(filter.accountId ? { lines: { some: { accountId: filter.accountId } } } : {}), ...(filter.search ? { OR: [{ entryNumber: { contains: filter.search } }, { description: { contains: filter.search } }, { sourceId: { contains: filter.search } }] } : {}) };
     const rows = await this.db.journalEntry.findMany({ where, include: journalInclude, orderBy: [{ transactionDate: "desc" }, { createdAt: "desc" }] });
     return rows.map(journalDto);
   }
@@ -128,7 +129,7 @@ export class AccountingService {
       const bank = await tx.bankAccount.create({ data: { name: input.name, bankName: input.bankName ?? null, accountNumber: input.accountNumber ?? null, glAccountId: glAccount.id } });
       await tx.auditLog.create({ data: { userId, action: "CREATE", entityType: "BankAccount", entityId: bank.id, afterJson: JSON.stringify(bank) } });
       return bank;
-    }).catch((error) => { if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") throw new HttpError(409, "BANK_OR_ACCOUNT_EXISTS", "The bank or general-ledger code already exists."); throw error; });
+    }).catch((error) => { if (isUniqueConstraintError(error)) throw new HttpError(409, "BANK_OR_ACCOUNT_EXISTS", "The bank or general-ledger code already exists."); throw error; });
   }
 
   async createFinancialTransaction(input: FinancialTransactionInput, userId: string) {
@@ -255,7 +256,18 @@ export class AccountingService {
   }
 }
 
-function journalDto(row: Prisma.JournalEntryGetPayload<{ include: typeof journalInclude }>) { return { ...row, totalDebit: minorToMoney(row.totalDebitMinor), totalCredit: minorToMoney(row.totalCreditMinor), lines: row.lines.map((line) => ({ ...line, debit: minorToMoney(line.debitMinor), credit: minorToMoney(line.creditMinor) })) }; }
+function journalDto(row: any) {
+  return {
+    ...row,
+    totalDebit: minorToMoney(row.totalDebitMinor),
+    totalCredit: minorToMoney(row.totalCreditMinor),
+    lines: row.lines.map((line: any) => ({
+      ...line,
+      debit: minorToMoney(line.debitMinor),
+      credit: minorToMoney(line.creditMinor),
+    })),
+  };
+}
 function moneyBalance<T extends { netMinor: number }>(row: T) { return { ...row, balance: minorToMoney(Math.abs(row.netMinor)), side: row.netMinor >= 0 ? "DEBIT" : "CREDIT" }; }
 export function calculateProfitAndLoss(rows: Array<{ type: string; systemCode: string | null; netMinor: number }>) { const revenueMinor = rows.filter((row) => row.type === "REVENUE" && row.systemCode !== "OTHER_INCOME").reduce((sum, row) => sum - row.netMinor, 0); const otherIncomeMinor = rows.filter((row) => row.type === "REVENUE" && row.systemCode === "OTHER_INCOME").reduce((sum, row) => sum - row.netMinor, 0); const contraRevenueMinor = rows.filter((row) => row.type === "CONTRA_REVENUE").reduce((sum, row) => sum + row.netMinor, 0); const costOfGoodsSoldMinor = rows.filter((row) => row.type === "EXPENSE" && row.systemCode === "COGS").reduce((sum, row) => sum + row.netMinor, 0); const operatingExpensesMinor = rows.filter((row) => row.type === "EXPENSE" && row.systemCode !== "COGS").reduce((sum, row) => sum + row.netMinor, 0); const netRevenueMinor = revenueMinor - contraRevenueMinor, grossProfitMinor = netRevenueMinor - costOfGoodsSoldMinor, netProfitMinor = grossProfitMinor + otherIncomeMinor - operatingExpensesMinor; return { revenueMinor, otherIncomeMinor, contraRevenueMinor, netRevenueMinor, costOfGoodsSoldMinor, grossProfitMinor, operatingExpensesMinor, netProfitMinor, grossMarginPercent: netRevenueMinor ? Number((grossProfitMinor / netRevenueMinor * 100).toFixed(2)) : 0, netMarginPercent: netRevenueMinor ? Number((netProfitMinor / netRevenueMinor * 100).toFixed(2)) : 0 }; }
 function cashbookType(type: FinancialTransactionInput["type"]) { if (type === "OWNER_INVESTMENT") return "OWNER_INVESTMENT" as const; if (type === "OWNER_WITHDRAWAL") return "OWNER_WITHDRAWAL" as const; if (type === "CASH_TO_BANK") return "CASH_DEPOSIT" as const; if (type === "BANK_TO_CASH") return "CASH_WITHDRAWAL" as const; if (type === "OTHER_INCOME") return "OTHER_INCOME" as const; if (type === "OTHER_EXPENSE") return "OTHER_EXPENSE" as const; return "ADJUSTMENT" as const; }

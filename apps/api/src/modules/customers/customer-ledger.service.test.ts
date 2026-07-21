@@ -6,7 +6,7 @@ import { signedMoneyToMinor } from "./customer.service.js";
 
 describe("customer money and validation", () => {
   it("preserves signed credit opening balances", () => { expect(signedMoneyToMinor("-0.50")).toBe(-50); expect(minorToMoney(-50)).toBe("-0.50"); });
-  it("validates customer account fields", () => expect(createCustomerInputSchema.safeParse({ name: "Ali Traders", businessName: "Ali Store", phone: "03001234567", whatsapp: "03001234567", address: "Lahore", taxIdentifier: "12345", customerType: "RETAILER", openingBalance: "100.00", paymentTermsDays: 14, isActive: true }).success).toBe(true));
+  it("validates customer account fields", () => expect(createCustomerInputSchema.safeParse({ name: "Ali Traders", businessName: "Ali Store", phone: "03001234567", whatsapp: "03001234567", address: "Lahore", taxIdentifier: "1234567", province: "Punjab", fbrRegistrationType: "REGISTERED", customerType: "RETAILER", openingBalance: "100.00", paymentTermsDays: 14, isActive: true }).success).toBe(true));
   it("requires a reason for manual ledger entries", () => expect(manualLedgerInputSchema.safeParse({ direction: "DEBIT", amount: "10.00", reason: "", occurredAt: "2026-07-17" }).success).toBe(false));
 });
 describe("immutable ledger calculations", () => {

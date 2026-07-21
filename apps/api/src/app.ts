@@ -1,8 +1,8 @@
 import cors from "cors";
 import express from "express";
 import helmet from "helmet";
-import type { PrismaClient } from "@prisma/client";
-import { prisma } from "./lib/prisma.js";
+import type { AppDbClient } from "./lib/db.js";
+import { db as defaultDb } from "./lib/db.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { createAuthRouter } from "./modules/auth/auth.routes.js";
 import { createUsersRouter } from "./modules/users/users.routes.js";
@@ -22,7 +22,7 @@ import { createExpenseRouter } from "./modules/expenses/expense.routes.js";
 import { createAccountingRouter } from "./modules/accounting/accounting.routes.js";
 import { createPurchaseReturnRouter } from "./modules/purchase-returns/purchase-return.routes.js";
 
-export function createApp(db: PrismaClient = prisma) {
+export function createApp(db: AppDbClient = defaultDb) {
   const app = express();
   app.disable("x-powered-by");
   app.use(helmet());

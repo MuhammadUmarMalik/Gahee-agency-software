@@ -1,4 +1,4 @@
-import { Prisma, type PrismaClient } from "@prisma/client";
+import type { AppDbClient, TransactionClient, PaymentMethod, SourceType, StockMovementType, BackupKind, JobType, JobStatus, CashDirection, CashbookEntryType, ReturnCondition } from "../../lib/db.js";
 import type { CreateExpenseCategoryInput, CreateExpenseInput, ExpenseListQuery, UpdateExpenseCategoryInput, VoidExpenseInput } from "@oil-agency/shared";
 import { HttpError } from "../../lib/http-error.js";
 import { pakistanDay } from "../cashbook/cashbook.service.js";
@@ -16,11 +16,11 @@ const expenseInclude = {
   expenseCategory: { select: { id: true, name: true, isActive: true } },
   createdBy: { select: { id: true, displayName: true, username: true } },
   voidedBy: { select: { id: true, displayName: true, username: true } },
-} satisfies Prisma.ExpenseInclude;
-type ExpenseRecord = Prisma.ExpenseGetPayload<{ include: typeof expenseInclude }>;
+} satisfies Record<string, unknown>;
+type ExpenseRecord = any;
 
 export class ExpenseService {
-  constructor(private readonly db: PrismaClient) {}
+  constructor(private readonly db: AppDbClient) {}
 
   private async ensureDefaultCategories() {
     await Promise.all(DEFAULT_CATEGORIES.map((name) => this.db.expenseCategory.upsert({
@@ -56,7 +56,7 @@ export class ExpenseService {
       throw new HttpError(409, "EXPENSE_CATEGORY_EXISTS", "An expense category with this name already exists.");
     }
     return this.db.$transaction(async (tx) => {
-      const data: Prisma.ExpenseCategoryUpdateInput = {
+      const data: any = {
         ...(input.name !== undefined ? { name: input.name } : {}),
         ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),
       };
@@ -68,7 +68,7 @@ export class ExpenseService {
 
   async list(query: ExpenseListQuery) {
     const dateRange = { gte: pakistanDay(query.from).start, lte: pakistanDay(query.to).end };
-    const where: Prisma.ExpenseWhereInput = {
+    const where: any = {
       incurredAt: dateRange,
       ...(query.categoryId ? { categoryId: query.categoryId } : {}),
       ...(query.paymentMethod ? { method: query.paymentMethod } : {}),

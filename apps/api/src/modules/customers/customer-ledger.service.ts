@@ -1,4 +1,4 @@
-import type { CustomerLedger, PrismaClient } from "@prisma/client";
+import type { AppDbClient, TransactionClient, PaymentMethod, SourceType, StockMovementType, BackupKind, JobType, JobStatus, CashDirection, CashbookEntryType, ReturnCondition } from "../../lib/db.js";
 import type { ManualLedgerInput } from "@oil-agency/shared";
 import { HttpError } from "../../lib/http-error.js";
 import { moneyToMinor, minorToMoney } from "../products/product.service.js";
@@ -13,7 +13,7 @@ export function aging(entries: Array<Pick<CustomerLedger, "debitMinor" | "credit
   const start = new Date(asOf); start.setHours(0, 0, 0, 0); return { overdueMinor: debts.filter((debt) => debt.remaining > 0 && debt.dueDate && debt.dueDate < start).reduce((sum, debt) => sum + debt.remaining, 0), earliestDueDate: debts.filter((debt) => debt.remaining > 0 && debt.dueDate).sort((a, b) => a.dueDate!.valueOf() - b.dueDate!.valueOf())[0]?.dueDate ?? null };
 }
 export class CustomerLedgerService {
-  constructor(private readonly db: PrismaClient) {}
+  constructor(private readonly db: AppDbClient) {}
   async statement(customerId: string, from?: string, to?: string) { const customer = await this.db.customer.findFirst({ where: { id: customerId, deletedAt: null } }); if (!customer) throw new HttpError(404, "CUSTOMER_NOT_FOUND", "Customer was not found."); const all = await this.db.customerLedger.findMany({ where: { customerId, ...(to ? { occurredAt: { lte: new Date(`${to}T23:59:59.999Z`) } } : {}) }, include: { sale: { select: { id: true, invoiceNumber: true } }, payment: { select: { receiptNumber: true, method: true } }, createdBy: { select: { displayName: true } }, reversalEntry: { select: { id: true } } }, orderBy: [{ occurredAt: "asc" }, { createdAt: "asc" }] }); const fromDate = from ? atNoon(from) : null; let running = 0; const entries = []; for (const entry of all) { const previousBalanceMinor = running; running += entry.debitMinor - entry.creditMinor; if (!fromDate || entry.occurredAt >= fromDate) entries.push({ ...entry, debit: minorToMoney(entry.debitMinor), credit: minorToMoney(entry.creditMinor), previousBalance: minorToMoney(previousBalanceMinor), currentBalance: minorToMoney(running) }); } const previousBalanceMinor = fromDate ? ledgerBalanceMinor(all.filter((entry) => entry.occurredAt < fromDate)) : 0; const age = aging(all); const { creditLimitMinor: _creditLimitMinor, openingBalanceMinor, ...customerDetails } = customer; return { customer: { ...customerDetails, openingBalance: minorToMoney(openingBalanceMinor) }, entries, previousBalance: minorToMoney(previousBalanceMinor), currentBalance: minorToMoney(running), overdue: minorToMoney(age.overdueMinor), earliestDueDate: age.earliestDueDate?.toISOString() ?? null };
   }
   async replace(customerId: string, entryId: string, input: ManualLedgerInput, userId: string) {
